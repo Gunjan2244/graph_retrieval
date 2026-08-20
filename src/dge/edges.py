@@ -26,8 +26,9 @@ enforces CLAUDE.md invariant 10 and is reused as-is by any future model-backed
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Sequence
+from typing import Literal
 
 from dge.domains.legal import DomainPack, MarkerPattern
 from dge.model import Edge, EdgeType, Node, NodeKind, Provenance
@@ -45,9 +46,12 @@ MARKER_ORIENTATION: dict[EdgeType, Orientation] = {
 # form ("Section 186.") or the bare form real Indian bare acts actually use
 # ("186. Obstructing public servant..."). Both key the registry on the same
 # normalized number+suffix ("186", "498A"), so a `referenced` marker written
-# as "section 9" resolves against a heading written either way.
+# as "section 9" resolves against a heading written either way. Also sees
+# through India Code's amendment bracket ("5[31. Hours of work...") — see
+# dge.parsing's `_AMD` — otherwise every amended heading is invisible to the
+# registry and every `referenced` marker aimed at it silently drops the edge.
 _HEADING_KEY_RE = re.compile(
-    r"^\s*(?:(?:Section|Chapter|Article)\s+)?(\d{1,4}[A-Z]{0,2})\.", re.IGNORECASE,
+    r"^\s*(?:(?:Section|Chapter|Article)\s+)?(?:\d{1,3}\[)*(\d{1,4}[A-Z]{0,2})\.", re.IGNORECASE,
 )
 _REF_RE = re.compile(r"section\s+(\d+[A-Za-z]*)", re.IGNORECASE)
 
@@ -67,12 +71,22 @@ def validate_evidence_span(evidence_span: str | None, input_window: str) -> bool
 
 @dataclass
 class _SectionCursor:
-    """Structural position of every node, computed once in document order."""
+    """Structural position of every node, computed once in document order.
+
+    `prev_sibling`/`next_sibling`/`parent_of` come from the real nesting
+    `dge.parsing` already built (its `PART_OF` edges), not a re-derived flat
+    scan — a proviso's "preceding" target is its previous sibling under the
+    same immediate parent (the sub-section or clause it modifies), not
+    whatever node happens to sit next to it in document order. Without
+    `structural_edges`, every node falls back to one flat sibling list in
+    document order — enough for small hand-written fixtures with no real
+    nesting, wrong for anything with sub-sections and clauses.
+    """
 
     section_registry: dict[str, str]        # '12' -> heading node_id (normalized, no word prefix)
-    prev_in_section: dict[str, str | None]   # node_id -> preceding node_id (same section)
-    next_in_section: dict[str, str | None]   # node_id -> following node_id (same section)
-    section_of: dict[str, str | None]        # node_id -> enclosing section heading node_id
+    prev_sibling: dict[str, str | None]      # node_id -> preceding node under the same parent
+    next_sibling: dict[str, str | None]      # node_id -> following node under the same parent
+    parent_of: dict[str, str | None]         # node_id -> immediate structural parent
 
 
 def _heading_key(text: str) -> str | None:
@@ -82,32 +96,36 @@ def _heading_key(text: str) -> str | None:
     return m.group(1).upper()
 
 
-def _build_cursor(nodes: Sequence[Node]) -> _SectionCursor:
+def _build_cursor(nodes: Sequence[Node], structural_edges: Sequence[Edge] = ()) -> _SectionCursor:
     section_registry: dict[str, str] = {}
-    prev_in_section: dict[str, str | None] = {}
-    next_in_section: dict[str, str | None] = {}
-    section_of: dict[str, str | None] = {}
-
-    current_section: str | None = None
-    prev_node: str | None = None
-
     for node in nodes:
         if node.kind is NodeKind.STRUCTURAL:
             key = _heading_key(node.raw)
             if key:
                 section_registry[key] = node.node_id
-            current_section = node.node_id
-            prev_node = None
 
-        section_of[node.node_id] = current_section
-        prev_in_section[node.node_id] = prev_node
-        next_in_section[node.node_id] = None
-        if prev_node is not None:
-            next_in_section[prev_node] = node.node_id
-        if node.kind is not NodeKind.STRUCTURAL:
-            prev_node = node.node_id
+    parent_of: dict[str, str | None] = {
+        e.src: e.dst for e in structural_edges if e.type is EdgeType.PART_OF
+    }
+    # FOOTNOTE nodes (editorial/amendment apparatus) are excluded from the
+    # sibling chain entirely, not just skipped as a match source below: a
+    # footnote sitting between a proviso and the provision it modifies would
+    # otherwise become that proviso's "preceding sibling" and turn into a
+    # closure-edge target, which is exactly the bug this guards against.
+    children: dict[str | None, list[str]] = {}
+    for node in nodes:
+        if node.kind is NodeKind.FOOTNOTE:
+            continue
+        children.setdefault(parent_of.get(node.node_id), []).append(node.node_id)
 
-    return _SectionCursor(section_registry, prev_in_section, next_in_section, section_of)
+    prev_sibling: dict[str, str | None] = {}
+    next_sibling: dict[str, str | None] = {}
+    for siblings in children.values():
+        for i, node_id in enumerate(siblings):
+            prev_sibling[node_id] = siblings[i - 1] if i > 0 else None
+            next_sibling[node_id] = siblings[i + 1] if i + 1 < len(siblings) else None
+
+    return _SectionCursor(section_registry, prev_sibling, next_sibling, parent_of)
 
 
 def _orient(marker_node: str, target_node: str, edge_type: EdgeType) -> tuple[str, str]:
@@ -116,17 +134,23 @@ def _orient(marker_node: str, target_node: str, edge_type: EdgeType) -> tuple[st
     return marker_node, target_node
 
 
-def extract_structural_edges(nodes: Sequence[Node], pack: DomainPack) -> list[Edge]:
-    """Free edges from `pack.structural_units` (proviso/explanation/illustration/...)."""
-    cursor = _build_cursor(nodes)
+def extract_structural_edges(
+    nodes: Sequence[Node], pack: DomainPack, structural_edges: Sequence[Edge] = (),
+) -> list[Edge]:
+    """Free edges from `pack.structural_units` (proviso/explanation/illustration/...).
+
+    `structural_edges` should be the `PART_OF` edges `dge.parsing` emitted for
+    these same nodes — see `_SectionCursor`.
+    """
+    cursor = _build_cursor(nodes, structural_edges)
     edges: list[Edge] = []
     for node in nodes:
-        if node.kind is NodeKind.STRUCTURAL:
+        if node.kind is NodeKind.STRUCTURAL or node.kind is NodeKind.FOOTNOTE:
             continue
         for unit in pack.structural_units:
             if not unit.regex.match(node.raw):
                 continue
-            target = cursor.prev_in_section.get(node.node_id) or cursor.section_of.get(node.node_id)
+            target = cursor.prev_sibling.get(node.node_id) or cursor.parent_of.get(node.node_id)
             if target is None or target == node.node_id:
                 break
             src, dst = _orient(node.node_id, target, unit.edge_type)
@@ -147,9 +171,9 @@ def extract_structural_edges(nodes: Sequence[Node], pack: DomainPack) -> list[Ed
 def _resolve_target(node: Node, marker: MarkerPattern, cursor: _SectionCursor) -> str | None:
     hint = marker.target_hint
     if hint == "preceding":
-        return cursor.prev_in_section.get(node.node_id) or cursor.section_of.get(node.node_id)
+        return cursor.prev_sibling.get(node.node_id) or cursor.parent_of.get(node.node_id)
     if hint == "following":
-        return cursor.next_in_section.get(node.node_id)
+        return cursor.next_sibling.get(node.node_id)
     if hint == "referenced":
         ref = _REF_RE.search(node.raw)
         if not ref:
@@ -158,7 +182,9 @@ def _resolve_target(node: Node, marker: MarkerPattern, cursor: _SectionCursor) -
     return None
 
 
-def extract_marker_edges(nodes: Sequence[Node], pack: DomainPack) -> tuple[list[Edge], list[str]]:
+def extract_marker_edges(
+    nodes: Sequence[Node], pack: DomainPack, structural_edges: Sequence[Edge] = (),
+) -> tuple[list[Edge], list[str]]:
     """Pattern edges from `pack.markers`.
 
     STRONG hits get full confidence; MEDIUM hits are still written (lower
@@ -169,12 +195,15 @@ def extract_marker_edges(nodes: Sequence[Node], pack: DomainPack) -> tuple[list[
     external Act, or a section number outside the ingested set) produces no
     edge — fabricating a link to a node that doesn't exist would violate
     invariant 10 in spirit even though no model was involved.
+
+    `structural_edges` should be the `PART_OF` edges `dge.parsing` emitted for
+    these same nodes — see `_SectionCursor`.
     """
-    cursor = _build_cursor(nodes)
+    cursor = _build_cursor(nodes, structural_edges)
     edges: list[Edge] = []
     warnings: list[str] = []
     for node in nodes:
-        if node.kind is NodeKind.STRUCTURAL:
+        if node.kind is NodeKind.STRUCTURAL or node.kind is NodeKind.FOOTNOTE:
             continue
         for marker in pack.markers:
             m = marker.regex.search(node.raw)

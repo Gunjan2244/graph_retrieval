@@ -37,8 +37,8 @@ import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -200,11 +200,9 @@ def main() -> int:
     results: list[ActResult] = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(process_act, act, args.out, args.force): act for act in sample}
-        done = 0
-        for fut in as_completed(futures):
+        for done, fut in enumerate(as_completed(futures), start=1):
             r = fut.result()
             results.append(r)
-            done += 1
             status = "skip" if r.skipped_existing else ("ERR " if r.error else "ok")
             print(f"  [{done}/{len(sample)}] {status:4s} {r.act_name[:70]}"
                   + (f"  ({r.error})" if r.error else ""), file=sys.stderr)
@@ -216,7 +214,7 @@ def main() -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps({
         "dataset": DATASET,
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "fetched_at": datetime.now(UTC).isoformat(),
         "requested_count": args.count,
         "seed": args.seed,
         "fetched": len([r for r in results if r.output_path]),

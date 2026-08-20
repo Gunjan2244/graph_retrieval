@@ -127,9 +127,9 @@ def resolve_policy(
     """
     if pack_overrides and edge_type in pack_overrides:
         return pack_overrides[edge_type]
-    for known in DEFAULT_POLICY:
+    for known, policy in DEFAULT_POLICY.items():
         if known.value == edge_type:
-            return DEFAULT_POLICY[known]
+            return policy
     return CLOSURE_DEFAULT if edge_class_name == "closure" else CONTEXT_DEFAULT
 
 

@@ -1,6 +1,6 @@
 from dge.domains.legal import get_pack
 from dge.edges import extract_marker_edges, extract_structural_edges, validate_evidence_span
-from dge.model import EdgeType
+from dge.model import EdgeClass, EdgeType, NodeKind
 from dge.parsing import PlainTextParser, finalize_doc_id
 
 PACK = get_pack("legal")
@@ -81,6 +81,34 @@ def test_resolvable_referenced_marker_links_to_the_real_section():
     assert len(supersedes) == 1
     assert supersedes[0].src == override_clause.node_id
     assert supersedes[0].dst == section9.node_id
+
+
+def test_footnote_node_is_never_a_closure_edge_target():
+    # Reproduces the exact Mines_Act,_1952 pathology (HANDOFF.md / task 1):
+    # an amendment footnote line sits between a rule and the proviso that
+    # modifies it. Before the fix, `_build_cursor`'s sibling chain included
+    # the footnote, so `prev_sibling` resolved the proviso's "preceding"
+    # target to the footnote instead of the rule it actually modifies.
+    raw = (
+        b"Section 1. Rule.\n\n"
+        b"(1) No person shall do X unless he pays compensation.\n\n"
+        b"1. Subs. by Act 42 of 1983, s. 11, for certain words (w.e.f. 31-5-1984).\n\n"
+        b"Provided that the owner has not paid the amount within six weeks."
+    )
+    result = PlainTextParser().parse(raw)
+    nodes, struct_edges = finalize_doc_id("d", list(result.nodes), list(result.structural_edges))
+    footnote = next(n for n in nodes if n.kind is NodeKind.FOOTNOTE)
+    rule = next(n for n in nodes if "No person shall do X" in n.raw)
+
+    struct = extract_structural_edges(nodes, PACK, struct_edges)
+    marker, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    closure_edges = [e for e in [*struct, *marker] if e.cls is EdgeClass.CLOSURE]
+
+    assert closure_edges  # sanity: the fixture must actually exercise a closure edge
+    assert all(e.src != footnote.node_id and e.dst != footnote.node_id for e in closure_edges)
+
+    proviso_edge = next(e for e in closure_edges if e.type is EdgeType.EXCEPTION_OF)
+    assert proviso_edge.dst == rule.node_id
 
 
 def test_definition_marker_runs_usage_to_definition_not_definition_to_usage():

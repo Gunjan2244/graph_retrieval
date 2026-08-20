@@ -7,8 +7,9 @@ config value and will be swapped more than once.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Protocol
 
 from dge.model import Edge, Node
 

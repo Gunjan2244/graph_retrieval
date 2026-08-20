@@ -14,9 +14,10 @@ dependencies = []
 parse = ["docling"]                       # Docling Parser adapter for PDFs/DOCX
 symbols = ["pyahocorasick"]                # corpus-scale mention linking
 llm = ["litellm", "pydantic>=2"]           # L1/L3b model adapters, structured output
+embed = ["fastembed"]                      # local L2 embedder (ONNX, no torch)
 db = ["psycopg[binary]", "pgvector"]       # Postgres server store
 server = ["mcp"]                           # MCP tool surface (Phase 4)
-all = ["dge[parse,symbols,llm,db,server]"]
+all = ["dge[parse,symbols,llm,embed,db,server]"]
 dev = ["pytest", "mypy", "ruff", "duckdb", "pyarrow"]
 
 [project.scripts]

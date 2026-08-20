@@ -24,18 +24,19 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Sequence
 
-from dge.bundle import write_bundle
+from dge.bundle import open_bundle, write_bundle, write_node_vectors
 from dge.domains.legal import get_pack
 from dge.edges import extract_marker_edges, extract_structural_edges
+from dge.interfaces import Embedder
 from dge.lexicon import extract_terms, link_mentions
-from dge.model import Document, DocStatus, Edge, Node, Term
-from dge.normalize import DeterministicNormalizer
+from dge.model import DocStatus, Document, Edge, Node, Term
 from dge.normalize import MODEL_ID as NORMALIZER_MODEL_ID
+from dge.normalize import DeterministicNormalizer
 from dge.parsing import PlainTextParser, finalize_doc_id
 
 PARSE_CONFIDENCE_THRESHOLD = 0.5
@@ -54,7 +55,7 @@ class IngestSummary:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _dedupe_edges(edges: list[Edge]) -> list[Edge]:
@@ -149,8 +150,8 @@ def ingest_documents(
             ledger.append(_ledger_row(doc_id, "lexicon", (time.perf_counter() - t0) * 1000))
 
             t0 = time.perf_counter()
-            pattern_struct_edges = extract_structural_edges(nodes, pack)
-            marker_edges, marker_warnings = extract_marker_edges(nodes, pack)
+            pattern_struct_edges = extract_structural_edges(nodes, pack, struct_edges)
+            marker_edges, marker_warnings = extract_marker_edges(nodes, pack, struct_edges)
             ledger.append(_ledger_row(doc_id, "edges:det", (time.perf_counter() - t0) * 1000))
             warnings.extend(f"{path}: {w}" for w in marker_warnings)
 
@@ -197,5 +198,70 @@ def ingest_documents(
         terms=len(all_terms),
         edges=len(all_edges),
         closure_edges=closure_edges,
+        warnings=tuple(warnings),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class EmbedSummary:
+    bundle_path: Path
+    model_id: str
+    documents_embedded: int
+    nodes_embedded: int
+    warnings: tuple[str, ...] = field(default_factory=tuple)
+
+
+def embed_bundle(bundle_path: Path, embedder: Embedder) -> EmbedSummary:
+    """L2: compute and write vectors into an already-ingested bundle.
+
+    Deliberately a separate entry point from `ingest_documents`, not a stage
+    inside it — L2 is disposable and independently re-runnable (CLAUDE.md
+    architecture table): swapping the embedder means calling this again, never
+    re-running L0/L1/L3.
+
+    Embeds each document's nodes in ONE call per document, not one call for the
+    whole corpus. This matters beyond batching: a contextual embedder
+    (`dge.adapters.embed_hosted.VoyageEmbedder`) uses the grouping itself to
+    contextualize chunks against their true siblings — mixing nodes from
+    different documents into one call would contextualize them against each
+    other, which is wrong, not just slower.
+    """
+    warnings: list[str] = []
+    nodes_embedded = 0
+    docs_embedded = 0
+
+    with open_bundle(bundle_path) as graph:
+        for doc in graph.documents():
+            if doc.review_state == "pending":
+                warnings.append(f"{doc.doc_id}: review-pending, skipped (no L1 ran)")
+                continue
+            doc_nodes = graph.nodes_in_doc_order(doc.doc_id)
+            if not doc_nodes:
+                continue
+
+            texts = [n.normalized or n.raw for n in doc_nodes]
+            doc_summary = doc.source_uri or doc.doc_id
+            vectors = embedder.embed_documents(texts, doc_context=doc_summary)
+            if len(vectors) != len(doc_nodes):
+                warnings.append(
+                    f"{doc.doc_id}: embedder returned {len(vectors)} vectors for "
+                    f"{len(doc_nodes)} nodes; skipped"
+                )
+                continue
+
+            write_node_vectors(
+                bundle_path,
+                model_id=embedder.model_id,
+                dim=embedder.dim,
+                vectors={n.node_id: v for n, v in zip(doc_nodes, vectors)},
+            )
+            nodes_embedded += len(doc_nodes)
+            docs_embedded += 1
+
+    return EmbedSummary(
+        bundle_path=bundle_path,
+        model_id=embedder.model_id,
+        documents_embedded=docs_embedded,
+        nodes_embedded=nodes_embedded,
         warnings=tuple(warnings),
     )

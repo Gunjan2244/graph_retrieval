@@ -29,7 +29,7 @@ CREATE INDEX idx_documents_tenant ON documents(tenant_id, acl_tag);
 CREATE TABLE nodes (
   node_id           TEXT PRIMARY KEY,
   doc_id            TEXT NOT NULL REFERENCES documents(doc_id),
-  kind              TEXT NOT NULL,  -- proposition | term | structural
+  kind              TEXT NOT NULL,  -- proposition | term | structural | footnote
   seq               INTEGER NOT NULL,   -- document order; drives assembly
   byte_start        INTEGER,
   byte_end          INTEGER,
@@ -81,6 +81,25 @@ CREATE INDEX idx_edges_dst ON edges(dst, type);
 CREATE INDEX idx_edges_class ON edges(class, type);
 CREATE INDEX idx_nodes_doc_seq ON nodes(doc_id, seq);
 CREATE INDEX idx_terms_surface ON terms(surface_form);
+
+-- L2: embeddings. DISPOSABLE by design (CLAUDE.md architecture table) — drop
+-- and rebuild freely on a new embedder, never referenced by closure/context
+-- edges. Vectors are stored as base64-packed float32 in a TEXT column rather
+-- than a native vector/BLOB type, the same portability trick document_blobs
+-- uses for raw_base64: one identical DDL works on SQLite and Postgres with no
+-- dialect branch. This trades an ANN index for a brute-force scan, which
+-- sqlite-vec's own docs call "often single-digit milliseconds" up to
+-- low-millions of rows — acceptable for this stage; swap in sqlite-vec /
+-- pgvector as an accelerator later without changing this table's meaning.
+CREATE TABLE node_vectors (
+  node_id           TEXT PRIMARY KEY REFERENCES nodes(node_id),
+  model_id          TEXT NOT NULL,      -- version key: rebuild is scoped by this
+  dim               INTEGER NOT NULL,
+  vector_base64     TEXT NOT NULL,      -- base64(float32[dim], little-endian)
+  computed_at       TEXT NOT NULL
+);
+
+CREATE INDEX idx_node_vectors_model ON node_vectors(model_id);
 
 -- Per-layer version keys, for surgical invalidation.
 CREATE TABLE layer_versions (

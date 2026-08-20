@@ -21,8 +21,8 @@ this one without ambiguity about what produced what.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import replace
-from typing import Sequence
 
 from dge.model import Node
 

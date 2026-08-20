@@ -38,6 +38,17 @@ not work.
       actually gates on (chain p95, closure density) are unaffected and pass
       clearly; the qualitative "everything's loosely related" claim isn't
       measurable by a lexical-marker script at all — that needs L2 (Stage C).
+      RE-RUN after the parser rewrite (PARSER_PLAN.md Task 8): the original
+      PASS was measured on the old blobby/shredded substrate, so it needed
+      re-checking on the ~10x-more-granular real substrate before trusting
+      it. Re-ran `scripts/phase0_density.py` against all 62 fetched acts on
+      the rewritten parser: 13,050 units (vs a much smaller, mis-shapen count
+      before) — **chain p95 = 3, closure density = 9.7%**, both essentially
+      unchanged from the original result despite the substrate being rebuilt
+      from scratch at correct granularity. This is the load-bearing check for
+      the whole rewrite: the traversal design's core assumption (closure
+      chains are short and sparse) holds on real node granularity, not just
+      on the accidental granularity blank-line splitting happened to produce.
 - [x] Hand-check 30 marker hits for precision (target >= 0.8).
       DONE: 32 hits hand-checked (script overshoots the requested 30
       slightly by design), ~93-97% true positive. Found and fixed one real
@@ -74,17 +85,122 @@ This phase is independently shippable and is the honest baseline the graph must
 beat later.
 
 - [ ] `sql/schema.sql` applied to both Postgres and SQLite from one file.
-- [ ] `Parser` protocol + Docling adapter. Emits sections, paragraphs,
-      sentences, tables with header association, footnotes, byte offsets.
-- [ ] Parse validation + confidence score. Below threshold → `review` status,
+- [x] `PlainTextParser` rewritten against the real 62-act corpus — Docling
+      adapter for PDF/DOCX still open, tracked separately below.
+      DONE: design and evidence in `PARSER_PLAN.md`. The old parser split on
+      blank lines alone and broke in two opposite ways depending on dialect —
+      whole sections collapsing into single nodes on one dialect (max 8375
+      chars), wrapped line fragments shredding into scraps on the other
+      (median 69 chars) — and both scored `parse_confidence == 1.0`, so
+      invariant 9 never fired. Replaced with a line classifier + one reflow
+      rule (a unit starts at an enumerator/keyword line and absorbs
+      continuation lines; a blank line is absorbed only while what's open is
+      still mid-wrap, judged from bareness AND sentence-completeness, not
+      blank-line runs) plus a real nesting stack (chapter > section >
+      sub-section > clause, `PART_OF` to the immediate parent, not the
+      nearest heading). Verified with `scripts/parser_corpus_report.py`
+      across all 62 acts: median-of-medians 137 chars, worst max 1493 chars
+      (was 8375), 60/62 documents parse at full confidence, the 2 genuinely
+      ambiguous ones (`Regional_Rural_Banks_Act,_1976`,
+      `All_India_Services_Act,_1951`) correctly gate below the 0.5 review
+      threshold instead of silently passing. `edges.py`'s `preceding`/
+      `referenced` target resolution now walks the real parent/sibling
+      structure instead of flat document-order adjacency — the two named
+      garbage edges (`exception_of` "3. Act not to apply" → "2. Definitions";
+      "Chapter II / 5. Chief Inspector" → "4. References to time of day") are
+      gone, verified directly against `Mines_Act,_1952`. 7 new regression
+      tests in `tests/test_parsing.py`; 67/67 tests pass, `ruff`/`mypy
+      --strict` clean.
+      FOLLOW-UP FIX: footnote lines were still classified `footnote`/
+      `footnote?` at the line level but emitted as `NodeKind.PROPOSITION` —
+      indistinguishable from real operative text, so `Mines_Act,_1952` alone
+      produced 132 footnote nodes in the graph, and `edges.py`'s sibling-chain
+      resolution let one become a closure-edge target directly (a proviso's
+      `exception_of` resolved to an amendment footnote instead of the rule it
+      modifies). Fixed with a distinct `NodeKind.FOOTNOTE` (`model.py`),
+      excluded from the sibling chain `_build_cursor` builds in `edges.py`
+      (so real siblings link past an interposed footnote rather than through
+      it) and from marker/structural-unit/definition/mention matching
+      everywhere else `NodeKind.STRUCTURAL` was already excluded
+      (`edges.py`, `lexicon.py`). Verified: 0 closure edges touch a footnote
+      node across all 62 corpus acts (was 1+ on `Mines_Act,_1952` alone).
+      2 new regression tests (`tests/test_parsing.py`,
+      `tests/test_edges.py::test_footnote_node_is_never_a_closure_edge_target`),
+      the latter confirmed to fail without the `_build_cursor` fix.
+- [x] Parse validation + confidence score. Below threshold → `review` status,
       pipeline halts for that document.
+      DONE, folded into the parser rewrite above: confidence combines decode
+      damage, fraction of units with no structural marker, fraction of
+      non-monotonic heading-shaped (likely footnote) lines, and outlier unit
+      length — see `PlainTextParser.parse` in `src/dge/parsing.py`. Thresholds
+      calibrated empirically against the corpus (`scripts/parser_corpus_report.py`),
+      not guessed.
 - [ ] Document classifier routing to parser configs (born-digital, multi-column,
       scanned, table-heavy).
 - [ ] L1 normalizer: coref, self-contained restatement, inherited context
       (section path, temporal scope, subject, conditions), unit/date
       normalization, assertive flag.
-- [ ] L2: embedder protocol + adapter; sparse index; hybrid retrieval with RRF;
+- [x] L2: embedder protocol + adapter; sparse index; hybrid retrieval with RRF;
       cross-encoder rerank.
+      - `node_vectors` table in `sql/schema.sql`: base64-packed float32 in a
+        TEXT column, same portability trick `document_blobs` already uses, so
+        one DDL still works on SQLite and Postgres with no dialect branch.
+        Brute-force cosine, no ANN index — fine at this corpus size, swap in
+        sqlite-vec/pgvector later as a pure accelerator.
+      - Two adapters behind the one `Embedder` Protocol:
+        `adapters/embed_local.py` (fastembed, ONNX, offline, no key) and
+        `adapters/embed_hosted.py` (Voyage contextualized API, stdlib urllib
+        only). NOTE: CLAUDE.md's stack table names BGE-M3 for self-host, but
+        fastembed's model zoo does not ship it — substituted
+        `bge-large-en-v1.5` (same lineage, but English-only and 512-token vs
+        BGE-M3's multilingual 8192). Real fidelity gap, flagged in the module
+        docstring rather than silently drifting from what was settled.
+      - `retrieval/hybrid.py`: RRF (not score averaging — cosine and TF-IDF
+        scores are not on comparable scales). Pure fusion logic, tested with
+        fake rankings, no model needed.
+      - `dge embed` CLI + `--use-vectors` on `dge query`. Query-time embedder
+        is chosen from the stored `model_id`, since embedding a query with a
+        different model than the corpus is silent nonsense.
+      - Verified end-to-end with the real model on `samples/sample_act.txt`:
+        on a deliberately paraphrased query ("handed over" for "transfer"),
+        sparse finds 3 nodes and misses the operative rule; dense finds 6 and
+        ranks the section head first; hybrid keeps both signals. Traversal
+        result is unchanged (closure still pulls both provisos, soundness
+        still passes) — vectors improve seeding, they do not touch the
+        guarantee.
+      - GOTCHA worth knowing: a bundle carries whatever schema it was written
+        with, so bundles created before `node_vectors` existed fail
+        `dge embed` with `no such table`. Re-ingest to fix. There is no
+        migration path for existing bundles yet.
+      - Rerank (the previously-missing piece): `Reranker` protocol in
+        `interfaces.py` implemented by two adapters, same pattern as the
+        embedder — `adapters/rerank_local.py` (fastembed's ONNX
+        cross-encoder, offline, no key) and `adapters/rerank_hosted.py`
+        (Voyage AI's `/v1/rerank` endpoint, stdlib urllib only, contract
+        verified against Voyage's docs). NOTE: CLAUDE.md's stack table names
+        BGE-reranker-v2; fastembed's cross-encoder zoo does not ship a v2 BGE
+        model (checked directly against `TextCrossEncoder.list_supported_models()`)
+        so `BAAI/bge-reranker-base` is substituted — same gap shape as the
+        embedder's BGE-M3 substitution, flagged in the module docstring, not
+        silently drifted from.
+      - `dge.query.rerank_seeder` composes with any `Seeder` (lexical-only or
+        the dense+sparse hybrid one) rather than being a variant of hybrid
+        seeding: it over-fetches `top_k * candidate_multiplier` candidates
+        from the base seeder, reranks them, and truncates to `top_k`. Wired
+        in as `--rerank` on `dge query`, independent of `--use-vectors`.
+        Unit tested against a fake reranker (candidate over-fetch, node
+        resolution, truncation) with no network or model dependency, same
+        discipline `test_vectors.py` uses for the embedder.
+      - Verified end-to-end with the real local cross-encoder
+        (`Xenova/ms-marco-MiniLM-L-6-v2`, swapped in via `--rerank-model` for
+        the smoke test — `bge-reranker-base` itself is ~1GB and this
+        sandbox's `/tmp` is a small tmpfs, not a statement about the default)
+        on `samples/sample_act.txt`: lexical-only seeding for "transfer made
+        in the ordinary course of business permitted" pulls in an off-topic
+        node at rank 3; `--rerank` correctly promotes the node containing
+        that exact clause into the seed set instead. Traversal result stays
+        sound either way — rerank improves seeding, it does not touch the
+        soundness guarantee.
 - [ ] Postgres job queue; per-document ingest ledger with stage timing and cost.
 
 **Exit:** on the Phase 0 query set, this beats naive fixed-size chunking on
@@ -133,12 +249,29 @@ operation.
       explicit `null` option, mandatory `evidence_span`.
 - [ ] Evidence-span validator — discard any edge whose span is not verbatim in
       the input window.
-- [ ] Traversal: closure to fixed point on the reverse index, non-optional
+- [x] Traversal: closure to fixed point on the reverse index, non-optional
       inclusion; context via best-first frontier with the degree penalty.
-- [ ] Assembly in document order with inherited-context prefixes and inline
+      DONE: `src/dge/traversal/graph.py` (Graph Protocol + FixtureGraph),
+      `expand.py` (`closure_fixpoint` / `context_frontier`, kept as two
+      functions per invariant 6). Direction is resolved PER EDGE TYPE, not
+      globally — `exception_of`/`supersedes` walk the reverse index while
+      `defines` walks forward, and a single global direction would break one
+      of them. Verified falsifiable: deleting the `incoming()` walk fails 7
+      tests including every soundness test.
+- [x] Assembly in document order with inherited-context prefixes and inline
       gloss splicing.
-- [ ] **Soundness check**: for every cited node, verify inbound closure edges
+      DONE: `src/dge/traversal/assemble.py`. Sorts by `(doc_id, seq)`, never
+      retrieval rank; superseded nodes labeled, not dropped.
+- [x] **Soundness check**: for every cited node, verify inbound closure edges
       were in context; expand and re-run if not.
+      DONE: `src/dge/traversal/soundness.py`, exposed as
+      `dge.query.verify_answer`. Reuses `expand.closure_neighbors` so the
+      check and the traversal cannot drift apart in what counts as a closure
+      neighbour. Demonstrated on `samples/sample_act.txt`: seeding on the
+      rule alone ranks its proviso 4th at 0.234 vs the rule's 3.448 (flat
+      retrieval misses it at any sane cutoff), closure pulls it in, and a
+      flat-RAG answer citing only the rule is reported UNSOUND with the exact
+      node to add.
 
 **Exit:** soundness violation rate = 0. Exception recall and stale-answer rate
 improve measurably over the Phase 1 baseline. Beat Phase 1 on the labeled
@@ -150,8 +283,13 @@ failure set by a clear margin — if not, fix the extractor, not the policy.
 
 - [ ] MCP server: `search`, `get_node`, `get_section`, `neighbors`, `expand`,
       `goto_definition`, `find_references`, `glossary`, `timeline`, `lint`.
-- [ ] Bundle writer/reader: single-file SQLite with original bytes, substrate,
+- [x] Bundle writer/reader: single-file SQLite with original bytes, substrate,
       nodes, terms, edges, vectors, manifest. Debug variant as JSONL directory.
+      READER DONE: `BundleGraph` / `open_bundle` in `src/dge/bundle.py`
+      implements the traversal `Graph` Protocol against SQLite, backing
+      `incoming()` with `idx_edges_dst`. `dge query` is wired in `cli.py`.
+      Vectors are still absent (no L2 yet) and the JSONL debug variant is
+      not built.
 - [ ] Round-trip test: bundle → fresh machine → identical traversal results.
 
 **Exit:** an agent with no prior context answers a multi-hop question correctly

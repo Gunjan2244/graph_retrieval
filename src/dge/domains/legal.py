@@ -14,12 +14,12 @@ That property is unusual and is why law is the right wedge.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Pattern, Sequence
+from re import Pattern
 
 from dge.model import EdgeClass, EdgeType
-
 
 # ---------------------------------------------------------------------------
 # Pack framework
@@ -351,7 +351,10 @@ LEGAL_CITATIONS: tuple[Pattern[str], ...] = (
     re.compile(r"\b(?:[Ss]ection|[Ss]ec\.?|§)\s*(\d+[A-Z]{0,2})"
                r"(?:\s*\(\s*\d+\s*\))?(?:\s*\(\s*[a-z]{1,2}\s*\))?", ),
     re.compile(r"\b[Aa]rticle\s+(\d+[A-Z]{0,2})\b"),
-    re.compile(r"\b(?:the\s+)?([A-Z][A-Za-z ,]{4,60})\s+Act,?\s+((?:19|20)\d{2})\b"),
+    # `\s` not a literal space: PARSER_PLAN.md Decision 3 — `node.raw` can now
+    # contain internal newlines from reflowed dialect-B text, so an Act name
+    # wrapped mid-citation must still match.
+    re.compile(r"\b(?:the\s+)?([A-Z][A-Za-z\s,]{4,60})\s+Act,?\s+((?:19|20)\d{2})\b"),
     re.compile(r"\b[Rr]ule\s+(\d+[A-Z]?)\b"),
     re.compile(r"\b[Oo]rder\s+([IVXL]+),?\s+[Rr]ule\s+(\d+)\b"),  # CPC style
     # Contract-internal

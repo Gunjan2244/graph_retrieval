@@ -34,7 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from dge.domains.legal import Confidence, DomainPack, get_pack  # noqa: E402
+from dge.domains.legal import Confidence, DomainPack, get_pack
 
 SENT_SPLIT = re.compile(r"(?<=[.;:])\s+(?=[A-Z(\"“])|\n{2,}")
 
@@ -110,7 +110,7 @@ def pct(values: list[int], q: float) -> float:
     if not values:
         return 0.0
     s = sorted(values)
-    k = min(len(s) - 1, int(round(q * (len(s) - 1))))
+    k = min(len(s) - 1, round(q * (len(s) - 1)))
     return float(s[k])
 
 

@@ -18,7 +18,7 @@ definition never leaks into a sibling section's glossary.
 from __future__ import annotations
 
 import re
-from typing import Sequence
+from collections.abc import Sequence
 
 from dge.domains.legal import DomainPack
 from dge.edges import validate_evidence_span
@@ -42,6 +42,8 @@ def extract_terms(nodes: Sequence[Node], pack: DomainPack) -> list[Term]:
     for node in nodes:
         if node.kind is NodeKind.STRUCTURAL:
             current_scope = node.node_id
+            continue
+        if node.kind is NodeKind.FOOTNOTE:
             continue
         for idx, pattern in enumerate(pack.definition_patterns):
             m = pattern.search(node.raw)
@@ -83,7 +85,7 @@ def link_mentions(nodes: Sequence[Node], terms: Sequence[Term]) -> list[Edge]:
         return edges
     compiled = _mention_regexes(terms)
     for node in nodes:
-        if node.kind is NodeKind.STRUCTURAL:
+        if node.kind is NodeKind.STRUCTURAL or node.kind is NodeKind.FOOTNOTE:
             continue
         for term, rx in compiled:
             if node.node_id == term.definition_node_id:

@@ -13,6 +13,7 @@ class NodeKind(StrEnum):
     PROPOSITION = "proposition"
     TERM = "term"
     STRUCTURAL = "structural"
+    FOOTNOTE = "footnote"  # editorial/amendment apparatus, not a provision — never a closure-edge target
 
 
 class EdgeClass(StrEnum):
