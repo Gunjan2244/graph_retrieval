@@ -1,0 +1,159 @@
+
+=== Phase 0: closure density — domain=legal ===
+documents                60
+units                    13006
+units w/ closure marker  1278  (9.8%)
+units w/ context marker  3418  (26.3%)
+definition sites         467
+citation-bearing units   1499
+chain length  mean/p95   1.29 / 3
+L3 cost gate admits      22.3% of units
+
+top markers:
+    2164  struct:sub_section
+    1232  struct:clause
+     486  struct:proviso
+     192  marker:deeming
+     151  marker:non_obstante
+     120  marker:subject_to
+     116  marker:for_the_purposes_of
+      98  struct:explanation
+      46  marker:save_as_provided
+      44  marker:unless
+      39  marker:nothing_shall_apply
+      23  marker:affirmed
+      22  struct:schedule
+      20  marker:shall_not_apply_to
+      16  marker:insertion
+      13  marker:repeal
+      10  marker:notwithstanding_clause
+       9  marker:omission
+
+--- PASS/FAIL ---
+[PASS] closure chain p95 <= 3           (got 3)
+[PASS] closure density <= 25%           (got 9.8%)
+       context:closure density ratio     2.7x
+
+--- hand-check these 30 hits for precision (target >= 0.8) ---
+
+[unless]
+  this Act, unless the context otherwise requires,-
+a.
+
+[explanation]
+  Explanation.-The assets of the Actuarial Society
+
+[repeal]
+  Repeal.-
+(1) The Ajmer-Merwara Agrarian Relief (Second) Ordinance, 1949 (30 of 1949), is hereby repealed.
+
+[deeming]
+  (2) When this Act or any portion thereof comes into force in Ajmer, so much of any Act, Regulation or notification in force therein, or any condition of a jagir or istimrarisanad, as is inconsistent with this Act or with
+
+[unless]
+  In this Act and in all Statutes made hereunder, unless the context otherwise requires,
+ (a) "Academic Council" means the Academic Council of the University;
+
+[subject_to]
+  (vi) subject to the provisions of this Act, every person employed immediately before the commencement of this Act in the Muhammadan Anglo-Oriental College, Aligarh, shall hold employment in the University by the same ten
+
+[deeming]
+  to an all-India Service shall continue to be in force and shall be deemed to be
+
+[deeming]
+  Validity of Anand marriages.-
+All marriages which may be or may have been duly solemnized according to the Sikh marriage ceremony called Anand 3[(commonly known as Anand Karaj)] shall be, and shall be deemed to have been
+
+[nothing_shall_apply]
+  Exemption of certain marraiges from Act.-
+Nothing in this Act shall apply to-
+(a) any marriage between persons not professing the Sikh religion, or
+(b) any marriage which has been judically declared to be null and void.
+
+[save_as_provided]
+  (2) It extends to the whole of India and, save as otherwise provided in this Act, it applies also to any offence thereunder committed outside India by any person.
+
+[unless]
+  Definitions.-
+In this Act, unless the context otherwise requires,-
+(a) "Agency" means the National Investigation Agency constituted under section 3 of the National Investigation Agency Act, 2008 (34 of 2008);
+
+[unless]
+  Definitions.-
+In this Act, unless the context otherwise requires,-
+(a) "Board" means the Betwa River Board established under section 4;
+
+[for_the_purposes_of]
+  Establishment and incorporation of the Betwa River Board.-
+(1) With effect from such date as the Central Government may, by notification in the Official Gazette, appoint in this behalf, there shall be established for the
+
+[unless]
+  Definitions.-
+In this Act, unless the context otherwise requires,-
+(a) "appointed day" means the 1st day of November, 1956;
+
+[proviso]
+  Provided that the boundary line shall be so demarcated as not to cut across any village or town:
+
+[unless]
+  Definitions.-
+(1) In this Act, unless the context otherwise requires,-
+(a) "administration" means proceedings of the nature of placing under administration and includes imposition of moratorium, reorganisation, winding u
+
+[proviso]
+  Provided that the contract, so designated under this clause, shall not include any contract,-
+(i) entered into between such parties and on such terms as the Central Government may, by notification, specify; or
+(ii) enter
+
+[save_as_provided]
+  (3) Save as otherwise provided in this Act, it shall come into force on the 1st day of April, 2016.
+
+[unless]
+  Definitions.-
+In this Act, unless the context otherwise requires,-
+(1) "Appellate Tribunal" means the Appellate Tribunal constituted under section 252 of the Income-tax Act;
+1[(2) "assessee" means a person,-
+(a) being a 
+
+[except_that]
+  Revival of Bombay Regulation 17 of 1827, section 13.-
+Notwithstanding any repeal effected by the Land Improvement Act, 1871 (26 of 1871), arrears of land-revenue of former years shall be recoverable by the Collector in t
+
+[deeming]
+  It shall be deemed to have come into force on the 29th day of September, 1994.
+
+[unless]
+  this Act, unless the context otherwise requires,-
+(a)
+
+[proviso]
+  Provided that no such order shall be made after the expiry of two years from the date of commencement of this Act.
+
+[proviso]
+  PROVIDED that the Government at any State may, be notification in the Official Gazette, direct that
+
+[proviso]
+  PROVIDED that no person shall apply for any such
+
+[unless]
+  this Act, unless the context otherwise requires, - 
+(i ) "appropriate Government" means, in relation to
+
+[affirmed]
+  night or such other night as may be approved in writing for a particular area
+
+[deeming]
+  (3) It shall be deemed to have come into force on the 23rd day of October, 2015.
+
+[unless]
+  Definitions.-
+(1) In this Act, unless the context otherwise requires,-
+3[(a) "Commercial Appellate Courts" means the Commercial Appellate Courts designated under section 3A;]
+4[(aa)] "Commercial Appellate Division" means
+
+[unless]
+  Definitions.-
+In this Act, unless the context otherwise requires,-
+(a) "accounts", in relation to commercial undertakings of a Government, includes trading, manufacturing and profit and loss accounts and balance-sheets a
+
+wrote phase0_result.json

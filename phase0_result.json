@@ -1,0 +1,393 @@
+{
+  "domain": "legal",
+  "documents": 60,
+  "units": 13006,
+  "closure_density": 0.09710902660310626,
+  "context_density": 0.26280178379209596,
+  "chain_p95": 3.0,
+  "gate_rate": 0.22274334922343533,
+  "markers": {
+    "marker:unless": 44,
+    "struct:explanation": 98,
+    "struct:proviso": 486,
+    "marker:deeming": 192,
+    "marker:for_the_purposes_of": 116,
+    "struct:sub_section": 2164,
+    "marker:repeal": 13,
+    "struct:clause": 1232,
+    "marker:save_as_provided": 46,
+    "marker:notwithstanding_clause": 10,
+    "marker:non_obstante": 151,
+    "marker:subject_to": 120,
+    "marker:nothing_shall_apply": 39,
+    "marker:shall_not_apply_to": 20,
+    "struct:schedule": 22,
+    "marker:affirmed": 3,
+    "marker:insertion": 16,
+    "marker:omission": 9,
+    "marker:except_that": 4,
+    "marker:substitution": 3
+  },
+  "per_doc": [
+    {
+      "file": "Actuaries_Act,_2006.txt",
+      "units": 718,
+      "closure_units": 22,
+      "closure_density": 0.0306
+    },
+    {
+      "file": "Ajmer_Tenancy_and_Land_Records_Act,_1950.txt",
+      "units": 619,
+      "closure_units": 132,
+      "closure_density": 0.2132
+    },
+    {
+      "file": "Aligarh_Muslim_University_Act,_1920.txt",
+      "units": 245,
+      "closure_units": 18,
+      "closure_density": 0.0735
+    },
+    {
+      "file": "All_India_Services_Act,_1951.txt",
+      "units": 30,
+      "closure_units": 1,
+      "closure_density": 0.0333
+    },
+    {
+      "file": "Anand_Marriage_Act,_1909.txt",
+      "units": 14,
+      "closure_units": 5,
+      "closure_density": 0.3571
+    },
+    {
+      "file": "Anti-Hijacking_Act,_2016.txt",
+      "units": 73,
+      "closure_units": 17,
+      "closure_density": 0.2329
+    },
+    {
+      "file": "Betwa_River_Board_Act,_1976.txt",
+      "units": 82,
+      "closure_units": 10,
+      "closure_density": 0.122
+    },
+    {
+      "file": "Bihar_and_West_Bengal_(Transfer_of_Territories)_Act,_1956.txt",
+      "units": 123,
+      "closure_units": 27,
+      "closure_density": 0.2195
+    },
+    {
+      "file": "Bilateral_Netting_of_Qualified_Financial_Contracts_Act,_2020.txt",
+      "units": 57,
+      "closure_units": 9,
+      "closure_density": 0.1579
+    },
+    {
+      "file": "Black_Money_(Undisclosed_Foreign_Income_and_Assets)_and_Imposition_of_Tax_Act,_2015.txt",
+      "units": 362,
+      "closure_units": 66,
+      "closure_density": 0.1823
+    },
+    {
+      "file": "Bombay_Revenue_Jurisdiction_Act,_1876.txt",
+      "units": 52,
+      "closure_units": 1,
+      "closure_density": 0.0192
+    },
+    {
+      "file": "Cable_Television_Networks_(Regulation)_Act,_1995.txt",
+      "units": 204,
+      "closure_units": 9,
+      "closure_density": 0.0441
+    },
+    {
+      "file": "Central_Laws_(Extension_to_Arunachal_Pradesh)_Act,_1993.txt",
+      "units": 13,
+      "closure_units": 1,
+      "closure_density": 0.0769
+    },
+    {
+      "file": "Charitable_and_Religious_Trusts_Act,_1920.txt",
+      "units": 137,
+      "closure_units": 6,
+      "closure_density": 0.0438
+    },
+    {
+      "file": "Child_Labour_(Prohibition_and_Regulation)_Act,_1986.txt",
+      "units": 251,
+      "closure_units": 7,
+      "closure_density": 0.0279
+    },
+    {
+      "file": "Commercial_Courts_Act,_2015.txt",
+      "units": 108,
+      "closure_units": 16,
+      "closure_density": 0.1481
+    },
+    {
+      "file": "Comptroller_and_Auditor-Generals_(Duties,_Powers_and_Conditions_of_Service)_Act,_1971.txt",
+      "units": 94,
+      "closure_units": 25,
+      "closure_density": 0.266
+    },
+    {
+      "file": "Consumer_Protection_Act,_1986.txt",
+      "units": 483,
+      "closure_units": 18,
+      "closure_density": 0.0373
+    },
+    {
+      "file": "Contempt_of_Courts_Act,_1971.txt",
+      "units": 393,
+      "closure_units": 27,
+      "closure_density": 0.0687
+    },
+    {
+      "file": "Contract_Labour_(Regulation_and_Abolition)_Act,_1970.txt",
+      "units": 473,
+      "closure_units": 20,
+      "closure_density": 0.0423
+    },
+    {
+      "file": "Credit_Information_Companies_(Regulation)_Act,_2005.txt",
+      "units": 762,
+      "closure_units": 22,
+      "closure_density": 0.0289
+    },
+    {
+      "file": "Dalmia_Dadri_Cement_Ltd._(Acquisition_and_Transfer_of_Undertakings)_Act,_1981.txt",
+      "units": 102,
+      "closure_units": 19,
+      "closure_density": 0.1863
+    },
+    {
+      "file": "Delhi_Police_Act,_1978.txt",
+      "units": 458,
+      "closure_units": 63,
+      "closure_density": 0.1376
+    },
+    {
+      "file": "Delhi_University_Act,_1922.txt",
+      "units": 177,
+      "closure_units": 17,
+      "closure_density": 0.096
+    },
+    {
+      "file": "Delhi_and_Ajmer_Rent_Control_Act,_1952.txt",
+      "units": 185,
+      "closure_units": 43,
+      "closure_density": 0.2324
+    },
+    {
+      "file": "Expenditure-Tax_Act,_1987.txt",
+      "units": 534,
+      "closure_units": 34,
+      "closure_density": 0.0637
+    },
+    {
+      "file": "Extradition_Act,_1962.txt",
+      "units": 141,
+      "closure_units": 2,
+      "closure_density": 0.0142
+    },
+    {
+      "file": "Faridabad_Development_Corporation_Act,_1956.txt",
+      "units": 83,
+      "closure_units": 11,
+      "closure_density": 0.1325
+    },
+    {
+      "file": "Foreign_Marriage_Act,_1969.txt",
+      "units": 314,
+      "closure_units": 16,
+      "closure_density": 0.051
+    },
+    {
+      "file": "Government_Management_of_Private_Estates_Act,_1892.txt",
+      "units": 24,
+      "closure_units": 3,
+      "closure_density": 0.125
+    },
+    {
+      "file": "Illegal_Migrants_(Determination_by_Tribunals)_Act,_1983.txt",
+      "units": 76,
+      "closure_units": 16,
+      "closure_density": 0.2105
+    },
+    {
+      "file": "Immoral_Traffic_(Prevention)_Act,_1956.txt",
+      "units": 654,
+      "closure_units": 28,
+      "closure_density": 0.0428
+    },
+    {
+      "file": "Indian_Medicine_Central_Council_Act,_1970.txt",
+      "units": 483,
+      "closure_units": 9,
+      "closure_density": 0.0186
+    },
+    {
+      "file": "Indian_Soldiers_(Litigation)_Act,_1925.txt",
+      "units": 53,
+      "closure_units": 6,
+      "closure_density": 0.1132
+    },
+    {
+      "file": "Interest_Tax_Act,_1974.txt",
+      "units": 159,
+      "closure_units": 37,
+      "closure_density": 0.2327
+    },
+    {
+      "file": "Legal_Tender_(Inscribed_Notes)_Act,_1964.txt",
+      "units": 6,
+      "closure_units": 4,
+      "closure_density": 0.6667
+    },
+    {
+      "file": "Madhya_Pradesh_Reorganisation_Act,_2000.txt",
+      "units": 225,
+      "closure_units": 70,
+      "closure_density": 0.3111
+    },
+    {
+      "file": "Maulana_Azad_National_Urdu_University_Act,_1996.txt",
+      "units": 181,
+      "closure_units": 21,
+      "closure_density": 0.116
+    },
+    {
+      "file": "Medical_Termination_of_Pregnancy_Act,_1971.txt",
+      "units": 110,
+      "closure_units": 5,
+      "closure_density": 0.0455
+    },
+    {
+      "file": "Mines_Act,_1952.txt",
+      "units": 420,
+      "closure_units": 62,
+      "closure_density": 0.1476
+    },
+    {
+      "file": "Minimum_Wages_Act,_1948.txt",
+      "units": 170,
+      "closure_units": 6,
+      "closure_density": 0.0353
+    },
+    {
+      "file": "National_Commission_for_Safai_Karamcharis_Act,_1993.txt",
+      "units": 58,
+      "closure_units": 5,
+      "closure_density": 0.0862
+    },
+    {
+      "file": "National_Highways_Act,_1956.txt",
+      "units": 60,
+      "closure_units": 3,
+      "closure_density": 0.05
+    },
+    {
+      "file": "Navy_Act,_1957.txt",
+      "units": 796,
+      "closure_units": 84,
+      "closure_density": 0.1055
+    },
+    {
+      "file": "Orissa_Weights_and_Measures_(Delhi_Repeal)_Act,_1958.txt",
+      "units": 5,
+      "closure_units": 1,
+      "closure_density": 0.2
+    },
+    {
+      "file": "Parliamentary_Proceedings_(Protection_of_Publication)_Act,_1977.txt",
+      "units": 8,
+      "closure_units": 2,
+      "closure_density": 0.25
+    },
+    {
+      "file": "Personal_Injuries_(Emergency_Provisions)_Act,_1962.txt",
+      "units": 33,
+      "closure_units": 4,
+      "closure_density": 0.1212
+    },
+    {
+      "file": "Pondicherry_(Alteration_of_Name)_Act,_2006.txt",
+      "units": 22,
+      "closure_units": 1,
+      "closure_density": 0.0455
+    },
+    {
+      "file": "Pre-Conception_and_Pre-Natal_Diagnostic_Techniques_(Prohibition_of_Sex_Selection)_Act,_1994.txt",
+      "units": 175,
+      "closure_units": 23,
+      "closure_density": 0.1314
+    },
+    {
+      "file": "President_(Discharge_of_Functions)_Act,_1969.txt",
+      "units": 7,
+      "closure_units": 0,
+      "closure_density": 0.0
+    },
+    {
+      "file": "Presidential_and_Vice-Presidential_Elections_Act,_1952.txt",
+      "units": 58,
+      "closure_units": 7,
+      "closure_density": 0.1207
+    },
+    {
+      "file": "Prisons_Act,_1894.txt",
+      "units": 257,
+      "closure_units": 7,
+      "closure_density": 0.0272
+    },
+    {
+      "file": "Probation_of_Offenders_Act,_1958.txt",
+      "units": 58,
+      "closure_units": 17,
+      "closure_density": 0.2931
+    },
+    {
+      "file": "Recovery_of_Debts_Due_to_Banks_and_Financial_Institutions_Act,_1993.txt",
+      "units": 577,
+      "closure_units": 27,
+      "closure_density": 0.0468
+    },
+    {
+      "file": "Recycling_of_Ships_Act,_2019.txt",
+      "units": 205,
+      "closure_units": 31,
+      "closure_density": 0.1512
+    },
+    {
+      "file": "Regional_Rural_Banks_Act,_1976.txt",
+      "units": 416,
+      "closure_units": 26,
+      "closure_density": 0.0625
+    },
+    {
+      "file": "Salary,_Allowances_and_Pension_of_Members_of_Parliament_Act,_1954.txt",
+      "units": 112,
+      "closure_units": 16,
+      "closure_density": 0.1429
+    },
+    {
+      "file": "Shipping_Development_Fund_Committee_(Abolition)_Act,_1986.txt",
+      "units": 55,
+      "closure_units": 17,
+      "closure_density": 0.3091
+    },
+    {
+      "file": "Stage_Carriages_Act,_1861.txt",
+      "units": 73,
+      "closure_units": 5,
+      "closure_density": 0.0685
+    },
+    {
+      "file": "Union_Territory_Goods_and_Services_Tax_Act,_2017.txt",
+      "units": 183,
+      "closure_units": 56,
+      "closure_density": 0.306
+    }
+  ]
+}

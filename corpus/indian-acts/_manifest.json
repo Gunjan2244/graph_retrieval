@@ -1,0 +1,490 @@
+{
+  "dataset": "mratanusarkar/Indian-Laws",
+  "fetched_at": "2026-08-20T08:07:49.392067+00:00",
+  "requested_count": 60,
+  "seed": 42,
+  "fetched": 60,
+  "errors": 0,
+  "acts": [
+    {
+      "act_name": "All India Services Act, 1951",
+      "output_path": "corpus/indian-acts/All_India_Services_Act,_1951.txt",
+      "sections": 4,
+      "bytes": 2254,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Anand Marriage Act, 1909",
+      "output_path": "corpus/indian-acts/Anand_Marriage_Act,_1909.txt",
+      "sections": 6,
+      "bytes": 3220,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Bilateral Netting of Qualified Financial Contracts Act, 2020",
+      "output_path": "corpus/indian-acts/Bilateral_Netting_of_Qualified_Financial_Contracts_Act,_2020.txt",
+      "sections": 11,
+      "bytes": 17118,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Anti-Hijacking Act, 2016",
+      "output_path": "corpus/indian-acts/Anti-Hijacking_Act,_2016.txt",
+      "sections": 21,
+      "bytes": 20951,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Betwa River Board Act, 1976",
+      "output_path": "corpus/indian-acts/Betwa_River_Board_Act,_1976.txt",
+      "sections": 24,
+      "bytes": 18489,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Central Laws (Extension to Arunachal Pradesh) Act, 1993",
+      "output_path": "corpus/indian-acts/Central_Laws_(Extension_to_Arunachal_Pradesh)_Act,_1993.txt",
+      "sections": 6,
+      "bytes": 2382,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Bombay Revenue Jurisdiction Act, 1876",
+      "output_path": "corpus/indian-acts/Bombay_Revenue_Jurisdiction_Act,_1876.txt",
+      "sections": 19,
+      "bytes": 14122,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Aligarh Muslim University Act, 1920",
+      "output_path": "corpus/indian-acts/Aligarh_Muslim_University_Act,_1920.txt",
+      "sections": 40,
+      "bytes": 42029,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Charitable and Religious Trusts Act, 1920",
+      "output_path": "corpus/indian-acts/Charitable_and_Religious_Trusts_Act,_1920.txt",
+      "sections": 12,
+      "bytes": 10507,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Cable Television Networks (Regulation) Act, 1995",
+      "output_path": "corpus/indian-acts/Cable_Television_Networks_(Regulation)_Act,_1995.txt",
+      "sections": 23,
+      "bytes": 14561,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Bihar and West Bengal (Transfer of Territories) Act, 1956",
+      "output_path": "corpus/indian-acts/Bihar_and_West_Bengal_(Transfer_of_Territories)_Act,_1956.txt",
+      "sections": 53,
+      "bytes": 38996,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Actuaries Act, 2006",
+      "output_path": "corpus/indian-acts/Actuaries_Act,_2006.txt",
+      "sections": 59,
+      "bytes": 55010,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Child Labour (Prohibition and Regulation) Act, 1986",
+      "output_path": "corpus/indian-acts/Child_Labour_(Prohibition_and_Regulation)_Act,_1986.txt",
+      "sections": 26,
+      "bytes": 17754,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Commercial Courts Act, 2015",
+      "output_path": "corpus/indian-acts/Commercial_Courts_Act,_2015.txt",
+      "sections": 23,
+      "bytes": 24290,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Comptroller and Auditor-Generals (Duties, Powers and Conditions of Service) Act, 1971",
+      "output_path": "corpus/indian-acts/Comptroller_and_Auditor-Generals_(Duties,_Powers_and_Conditions_of_Service)_Act,_1971.txt",
+      "sections": 25,
+      "bytes": 33516,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Consumer Protection Act, 1986",
+      "output_path": "corpus/indian-acts/Consumer_Protection_Act,_1986.txt",
+      "sections": 31,
+      "bytes": 34287,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Contempt of Courts Act, 1971",
+      "output_path": "corpus/indian-acts/Contempt_of_Courts_Act,_1971.txt",
+      "sections": 25,
+      "bytes": 27873,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Black Money (Undisclosed Foreign Income and Assets) and Imposition of Tax Act, 2015",
+      "output_path": "corpus/indian-acts/Black_Money_(Undisclosed_Foreign_Income_and_Assets)_and_Imposition_of_Tax_Act,_2015.txt",
+      "sections": 88,
+      "bytes": 98388,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Dalmia Dadri Cement Ltd. (Acquisition and Transfer of Undertakings) Act, 1981",
+      "output_path": "corpus/indian-acts/Dalmia_Dadri_Cement_Ltd._(Acquisition_and_Transfer_of_Undertakings)_Act,_1981.txt",
+      "sections": 32,
+      "bytes": 33236,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Contract Labour (Regulation and Abolition) Act, 1970",
+      "output_path": "corpus/indian-acts/Contract_Labour_(Regulation_and_Abolition)_Act,_1970.txt",
+      "sections": 35,
+      "bytes": 34389,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Credit Information Companies (Regulation) Act, 2005",
+      "output_path": "corpus/indian-acts/Credit_Information_Companies_(Regulation)_Act,_2005.txt",
+      "sections": 37,
+      "bytes": 59918,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Delhi University Act, 1922",
+      "output_path": "corpus/indian-acts/Delhi_University_Act,_1922.txt",
+      "sections": 49,
+      "bytes": 33402,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Foreign Marriage Act, 1969",
+      "output_path": "corpus/indian-acts/Foreign_Marriage_Act,_1969.txt",
+      "sections": 30,
+      "bytes": 23677,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Expenditure-Tax Act, 1987",
+      "output_path": "corpus/indian-acts/Expenditure-Tax_Act,_1987.txt",
+      "sections": 33,
+      "bytes": 37303,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Delhi and Ajmer Rent Control Act, 1952",
+      "output_path": "corpus/indian-acts/Delhi_and_Ajmer_Rent_Control_Act,_1952.txt",
+      "sections": 49,
+      "bytes": 54331,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Faridabad Development Corporation Act, 1956",
+      "output_path": "corpus/indian-acts/Faridabad_Development_Corporation_Act,_1956.txt",
+      "sections": 37,
+      "bytes": 19416,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Government Management of Private Estates Act, 1892",
+      "output_path": "corpus/indian-acts/Government_Management_of_Private_Estates_Act,_1892.txt",
+      "sections": 9,
+      "bytes": 4838,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Extradition Act, 1962",
+      "output_path": "corpus/indian-acts/Extradition_Act,_1962.txt",
+      "sections": 37,
+      "bytes": 11292,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Legal Tender (Inscribed Notes) Act, 1964",
+      "output_path": "corpus/indian-acts/Legal_Tender_(Inscribed_Notes)_Act,_1964.txt",
+      "sections": 3,
+      "bytes": 1476,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Indian Soldiers (Litigation) Act, 1925",
+      "output_path": "corpus/indian-acts/Indian_Soldiers_(Litigation)_Act,_1925.txt",
+      "sections": 15,
+      "bytes": 14145,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Immoral Traffic (Prevention) Act, 1956",
+      "output_path": "corpus/indian-acts/Immoral_Traffic_(Prevention)_Act,_1956.txt",
+      "sections": 25,
+      "bytes": 48378,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Illegal Migrants (Determination by Tribunals) Act, 1983",
+      "output_path": "corpus/indian-acts/Illegal_Migrants_(Determination_by_Tribunals)_Act,_1983.txt",
+      "sections": 29,
+      "bytes": 24023,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Medical Termination of Pregnancy Act, 1971",
+      "output_path": "corpus/indian-acts/Medical_Termination_of_Pregnancy_Act,_1971.txt",
+      "sections": 8,
+      "bytes": 7510,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Indian Medicine Central Council Act, 1970",
+      "output_path": "corpus/indian-acts/Indian_Medicine_Central_Council_Act,_1970.txt",
+      "sections": 36,
+      "bytes": 34645,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Interest Tax Act, 1974",
+      "output_path": "corpus/indian-acts/Interest_Tax_Act,_1974.txt",
+      "sections": 30,
+      "bytes": 44810,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Minimum Wages Act, 1948",
+      "output_path": "corpus/indian-acts/Minimum_Wages_Act,_1948.txt",
+      "sections": 5,
+      "bytes": 12420,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "National Highways Act, 1956",
+      "output_path": "corpus/indian-acts/National_Highways_Act,_1956.txt",
+      "sections": 11,
+      "bytes": 8931,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "National Commission for Safai Karamcharis Act, 1993",
+      "output_path": "corpus/indian-acts/National_Commission_for_Safai_Karamcharis_Act,_1993.txt",
+      "sections": 15,
+      "bytes": 11633,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Orissa Weights and Measures (Delhi Repeal) Act, 1958",
+      "output_path": "corpus/indian-acts/Orissa_Weights_and_Measures_(Delhi_Repeal)_Act,_1958.txt",
+      "sections": 3,
+      "bytes": 1786,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Parliamentary Proceedings (Protection of Publication) Act, 1977",
+      "output_path": "corpus/indian-acts/Parliamentary_Proceedings_(Protection_of_Publication)_Act,_1977.txt",
+      "sections": 4,
+      "bytes": 1428,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Personal Injuries (Emergency Provisions) Act, 1962",
+      "output_path": "corpus/indian-acts/Personal_Injuries_(Emergency_Provisions)_Act,_1962.txt",
+      "sections": 8,
+      "bytes": 12508,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Maulana Azad National Urdu University Act, 1996",
+      "output_path": "corpus/indian-acts/Maulana_Azad_National_Urdu_University_Act,_1996.txt",
+      "sections": 43,
+      "bytes": 35826,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "President (Discharge of Functions) Act, 1969",
+      "output_path": "corpus/indian-acts/President_(Discharge_of_Functions)_Act,_1969.txt",
+      "sections": 3,
+      "bytes": 2519,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Pondicherry (Alteration of Name) Act, 2006",
+      "output_path": "corpus/indian-acts/Pondicherry_(Alteration_of_Name)_Act,_2006.txt",
+      "sections": 10,
+      "bytes": 3826,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Ajmer Tenancy and Land Records Act, 1950",
+      "output_path": "corpus/indian-acts/Ajmer_Tenancy_and_Land_Records_Act,_1950.txt",
+      "sections": 209,
+      "bytes": 166469,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Presidential and Vice-Presidential Elections Act, 1952",
+      "output_path": "corpus/indian-acts/Presidential_and_Vice-Presidential_Elections_Act,_1952.txt",
+      "sections": 23,
+      "bytes": 17035,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Pre-Conception and Pre-Natal Diagnostic Techniques (Prohibition of Sex Selection) Act, 1994",
+      "output_path": "corpus/indian-acts/Pre-Conception_and_Pre-Natal_Diagnostic_Techniques_(Prohibition_of_Sex_Selection)_Act,_1994.txt",
+      "sections": 34,
+      "bytes": 44917,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Delhi Police Act, 1978",
+      "output_path": "corpus/indian-acts/Delhi_Police_Act,_1978.txt",
+      "sections": 156,
+      "bytes": 147533,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Madhya Pradesh Reorganisation Act, 2000",
+      "output_path": "corpus/indian-acts/Madhya_Pradesh_Reorganisation_Act,_2000.txt",
+      "sections": 86,
+      "bytes": 81175,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Probation of Offenders Act, 1958",
+      "output_path": "corpus/indian-acts/Probation_of_Offenders_Act,_1958.txt",
+      "sections": 19,
+      "bytes": 16479,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Salary, Allowances and Pension of Members of Parliament Act, 1954",
+      "output_path": "corpus/indian-acts/Salary,_Allowances_and_Pension_of_Members_of_Parliament_Act,_1954.txt",
+      "sections": 10,
+      "bytes": 30524,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Mines Act, 1952",
+      "output_path": "corpus/indian-acts/Mines_Act,_1952.txt",
+      "sections": 88,
+      "bytes": 114296,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Shipping Development Fund Committee (Abolition) Act, 1986",
+      "output_path": "corpus/indian-acts/Shipping_Development_Fund_Committee_(Abolition)_Act,_1986.txt",
+      "sections": 20,
+      "bytes": 18321,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Recovery of Debts Due to Banks and Financial Institutions Act, 1993",
+      "output_path": "corpus/indian-acts/Recovery_of_Debts_Due_to_Banks_and_Financial_Institutions_Act,_1993.txt",
+      "sections": 37,
+      "bytes": 41526,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Regional Rural Banks Act, 1976",
+      "output_path": "corpus/indian-acts/Regional_Rural_Banks_Act,_1976.txt",
+      "sections": 34,
+      "bytes": 32542,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Prisons Act, 1894",
+      "output_path": "corpus/indian-acts/Prisons_Act,_1894.txt",
+      "sections": 62,
+      "bytes": 41593,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Stage Carriages Act, 1861",
+      "output_path": "corpus/indian-acts/Stage_Carriages_Act,_1861.txt",
+      "sections": 23,
+      "bytes": 15543,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Recycling of Ships Act, 2019",
+      "output_path": "corpus/indian-acts/Recycling_of_Ships_Act,_2019.txt",
+      "sections": 46,
+      "bytes": 43206,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Union Territory Goods and Services Tax Act, 2017",
+      "output_path": "corpus/indian-acts/Union_Territory_Goods_and_Services_Tax_Act,_2017.txt",
+      "sections": 26,
+      "bytes": 44287,
+      "skipped_existing": false,
+      "error": null
+    },
+    {
+      "act_name": "Navy Act, 1957",
+      "output_path": "corpus/indian-acts/Navy_Act,_1957.txt",
+      "sections": 188,
+      "bytes": 182800,
+      "skipped_existing": false,
+      "error": null
+    }
+  ]
+}

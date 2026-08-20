@@ -1,0 +1,37 @@
+[project]
+name = "dge"
+version = "0.0.1"
+description = "Document Graph Engine — layered, LLM-traversable document representation"
+requires-python = ">=3.12"
+# Core dependencies: none. The deterministic pipeline (parse/normalize/lexicon/
+# pattern-edges/bundle) is stdlib-only by design — every external model or
+# vendor SDK lives behind a Protocol in dge.interfaces and is an adapter you
+# opt into, per CLAUDE.md code conventions ("no vendor SDK imported outside
+# its adapter module"). Install the extra that matches which adapter you wire.
+dependencies = []
+
+[project.optional-dependencies]
+parse = ["docling"]                       # Docling Parser adapter for PDFs/DOCX
+symbols = ["pyahocorasick"]                # corpus-scale mention linking
+llm = ["litellm", "pydantic>=2"]           # L1/L3b model adapters, structured output
+db = ["psycopg[binary]", "pgvector"]       # Postgres server store
+server = ["mcp"]                           # MCP tool surface (Phase 4)
+all = ["dge[parse,symbols,llm,db,server]"]
+dev = ["pytest", "mypy", "ruff", "duckdb", "pyarrow"]
+
+[project.scripts]
+dge = "dge.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dge"]
+
+[tool.mypy]
+strict = true
+files = ["src"]
+
+[tool.ruff]
+line-length = 100
