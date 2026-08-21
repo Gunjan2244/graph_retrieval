@@ -239,16 +239,124 @@ operation.
 
 - [ ] Deterministic edges first: section hierarchy, adjacency, table↔caption,
       explicit cross-references, footnotes, citations, amendment headers.
-- [ ] Pattern edges from `LEGAL_MARKERS`. STRONG-confidence hits become edges
-      directly; MEDIUM become candidates for model verification.
-- [ ] Two competing non obstante clauses = a real conflict. FLAG it; never
-      silently pick one.
-- [ ] Cost gate: `pack.should_run_l3(text)` before any L3 call.
-- [ ] `EdgeExtractor` protocol + LLM adapter. Structured output, closed enum,
-      one section per call, section path + document summary in context,
-      explicit `null` option, mandatory `evidence_span`.
-- [ ] Evidence-span validator — discard any edge whose span is not verbatim in
+      PARTIAL: hierarchy, adjacency, cross-references, footnotes and markers
+      are built (`src/dge/edges.py`, `src/dge/parsing.py`). Table↔caption and
+      amendment-header→parent are NOT — no table extraction exists at all
+      (needs the Docling adapter, still open in Phase 1).
+- [x] Evidence-span validator — discard any edge whose span is not verbatim in
       the input window.
+      DONE, and built FIRST, before any model call existed — everything below
+      is only worth having if this holds. `src/dge/l3/evidence.py`, 15
+      adversarial tests in `tests/test_evidence.py`. Three verdicts rather
+      than two: EXACT (byte-for-byte substring), REFLOWED (matches after
+      collapsing whitespace, including the U+00A0 this corpus is full of and
+      the internal newlines PARSER_PLAN.md Decision 3 leaves inside
+      `node.raw`), REJECTED. **REFLOWED is accepted and this is a deliberate
+      decision**: exact-only rejects true edges without catching a single
+      fabrication, because the window a model sees contains hard-wrapped lines
+      and every model returns them reflowed. What makes it safe is that the
+      check returns the WINDOW's own slice, so what lands in
+      `edges.evidence_span` is verbatim substrate text regardless of how the
+      model rendered it — pinned by
+      `test_recovered_span_always_slices_the_window_for_every_accepted_case`.
+      Everything else stays strict: paraphrase, near-miss, case change
+      (reported distinctly as `case_mismatch_only`), spans from another
+      section, and spans under 12 chars are all rejected. The length floor
+      matters — without it "the" is a valid citation of any legal text ever
+      written. `dge.edges.validate_evidence_span` now delegates to the same
+      function so the pattern and model paths cannot drift apart on what
+      "verbatim" means.
+- [x] Cost gate: `pack.should_run_l3(text)` before any L3 call.
+      DONE and MEASURED — `scripts/phase3_gate_report.py`, run against all 62
+      acts on the rebuilt substrate. **Phase 0's 22.3% does not transfer, and
+      the honest number is worse than it looks:**
+
+        gate at NODE granularity      30.6% of nodes, 37.8% of characters
+        gate at SECTION granularity   54.0% of calls, 76.0% of characters
+
+      The node number is the one comparable to Phase 0 (22.3% → 30.6%,
+      explained by the substrate rebuild). **The section number is the one
+      that bills.** L3 runs one section per call (docs/05 5.3) and a section
+      is admitted if any node in it carries any gate term, so aggregation
+      destroys most of the saving: the gate skips 46% of calls but only 24%
+      of input tokens, and the sections it admits are the long ones.
+      This is not a bug to route around — it is what statutory text is like,
+      and it is the same property (docs/07 7.1) that makes law the right
+      wedge. The lever is pack data, not engine code (invariant 11): 178 of
+      1272 admitted sections are admitted by `'provided'` alone, 146 by
+      `'subject to'` alone. Tightening those two is the first cost move and
+      is left for Phase 6; neither has been measured for precision yet.
+- [x] `EdgeExtractor` protocol + LLM adapter. Structured output, closed enum,
+      one section per call, section path + document summary in context, explicit
+      `null` option, mandatory `evidence_span`.
+      **BUILT AND TESTED AGAINST A FAKE ONLY — never run against a real
+      model.** Ticked for the plumbing, which is real and verified; the
+      quality question this stage exists to answer is untouched, and the exit
+      criterion below is correspondingly still open. `src/dge/l3/`:
+      `sections.py` (windows + gate), `prompt.py` (prompt program +
+      `prompt_hash`, stdlib-only), `schema.py` (Pydantic, closed enums
+      injected into the wire schema for BOTH the type field and the unit
+      labels), `run.py` (orchestration), and `src/dge/adapters/extract_llm.py`
+      (LiteLLM — the only file that knows a vendor exists; Groq / Gemini /
+      Ollama are `--model` strings, not code paths).
+      The closed enum is exactly the three types this phase's header names —
+      `exception_of`, `supersedes`, `defines` — plus an explicit `none`.
+      Units are shown as `[N1]`-style labels and node ids are never shown, so
+      a label the model cannot guess is an endpoint it cannot fabricate.
+      Nothing downstream trusts the adapter: `run.validate_candidate`
+      re-checks the type against the enum, re-checks both endpoints against
+      the window it built, and re-checks the evidence span, so a provider that
+      ignores `strict` (or a local Ollama with no schema support, which falls
+      back to JSON mode) can produce junk that is discarded, never junk that
+      is stored. 16 adversarial tests in `tests/test_l3_extract.py`,
+      7 recorded-response tests in `tests/test_l3_adapter.py`, and
+      5 bundle round-trip tests in `tests/test_l3_bundle.py`.
+      Wired as `dge extract`, with `--dry-run` pricing a corpus with no key
+      and no network.
+- [x] Pattern edges from `LEGAL_MARKERS`. STRONG-confidence hits become edges
+      directly; MEDIUM become candidates for model verification.
+      DONE. Verification is AGREEMENT, not a second prompt: a MEDIUM marker
+      edge is confirmed when the L3 pass independently proposes the same
+      (src, dst, type) from the same window. Three outcomes —
+      confirmed → `Provenance.VERIFIED` with the model stamped on it;
+      contradicted → KEPT with confidence halved to 0.3 so it falls below
+      the default traversal floor of 0.5 (invariant 5: filter at traversal
+      time, never delete at ingest); never examined (the gate skipped that
+      section) → untouched, because no model formed an opinion and the graph
+      must not depend on the cost gate's mood. STRONG edges pass through
+      untouched — a drafting convention beats a model's opinion about one.
+- [x] Two competing non obstante clauses = a real conflict. FLAG it; never
+      silently pick one.
+      DONE — `src/dge/l3/conflict.py`, 12 tests. **Representation decision: a
+      conflict is not an edge type and not a node.** Where both claims resolve
+      it IS the cycle the `supersedes` edges already form; where a claim is
+      act-wide ("notwithstanding anything contained in this Act") it resolves
+      to no single node — an edge to every node is a hub, not information —
+      and the derived finding is the whole representation. Rejected
+      alternatives and why, in the module docstring: a `conflicts_with` edge
+      type would restate what the graph already carries and would need a
+      `policy.py` entry (invariant 11 leak); a synthesised conflict node would
+      have `raw` that exists in no document (invariant 1) or copied from both
+      (invariant 4); a winner field is the one thing docs/07 forbids outright.
+      **Correction to the obvious claim, measured not assumed:** "closure
+      traversal pulls the competitor in anyway" is only half true. A
+      `referenced` marker resolves to the named section's HEADING while the
+      claim sits in a sub-section, so the cycle is between sections, not
+      clauses. Seeding a section heading does reach the competitor on the
+      reverse index; seeding the bare clause does NOT, because the hop from a
+      clause to its own heading is `part_of`, a budgeted CONTEXT edge. Both
+      halves are pinned in `tests/test_conflict.py`. So the finding does real
+      work for clause-level seeds, and `dge query` reports it beside the
+      soundness verdict.
+      **OPEN, deliberately not decided here:** whether a closure relation
+      asserted against a section should propagate to that section's children.
+      Making `part_of` closure-traversable would unify the budgeted and
+      unbudgeted halves behind one mechanism, which invariant 6 forbids doing
+      casually. That needs its own decision, not a side effect of this module.
+      Also fixed while measuring: `non_obstante` required "contained" before
+      "to the contrary" and so missed "notwithstanding anything TO THE
+      CONTRARY CONTAINED in this Act" entirely — 170 → 181 matches across the
+      corpus, conflicts found in 1 → 2 documents. Regression test added.
 - [x] Traversal: closure to fixed point on the reverse index, non-optional
       inclusion; context via best-first frontier with the degree penalty.
       DONE: `src/dge/traversal/graph.py` (Graph Protocol + FixtureGraph),
@@ -276,6 +384,23 @@ operation.
 **Exit:** soundness violation rate = 0. Exception recall and stale-answer rate
 improve measurably over the Phase 1 baseline. Beat Phase 1 on the labeled
 failure set by a clear margin — if not, fix the extractor, not the policy.
+
+**EXIT NOT MET.** Every mechanism above is built and tested; none of the
+numbers the exit asks for exist yet, and a fake model cannot produce them.
+What is blocking, in order:
+
+1. **No real model has ever run.** No key is set. `dge extract --dry-run`
+   works today with zero keys; a real run needs one free-tier key —
+   **Groq (`GROQ_API_KEY`, console.groq.com) is the recommendation**:
+   generous free tier, native `json_schema` structured output, and
+   `groq/llama-3.3-70b-versatile` is already the adapter's default. Google AI
+   Studio (`GEMINI_API_KEY`, `gemini/gemini-3.6-flash`) is the fallback and
+   also works — a one-word `--model` change, not a code change.
+2. **The labeled failure set is 15/50** (Phase 0, still open). Without it
+   there is nothing to measure "beat Phase 1 by a clear margin" against.
+3. **The eval harness that would produce the seed / expansion / never-reached
+   split** (Standing instrumentation, below) is not built. `eval_traces`
+   exists in `sql/schema.sql` and nothing writes to it.
 
 ---
 

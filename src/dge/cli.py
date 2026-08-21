@@ -20,11 +20,15 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dge.adapters.extract_llm import DEFAULT_MODEL as EXTRACT_DEFAULT_MODEL
 from dge.pipeline import ingest_documents
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from dge.bundle import BundleGraph
     from dge.interfaces import Reranker
+    from dge.l3.conflict import OverrideConflict
     from dge.query import Seeder
 
 
@@ -133,6 +137,7 @@ def _make_reranker(provider: str, model: str | None) -> Reranker:
 
 def _cmd_query(args: argparse.Namespace) -> int:
     from dge.bundle import open_bundle
+    from dge.domains.legal import get_pack
     from dge.query import rerank_seeder, run_query
     from dge.traversal.policy import Budget
 
@@ -163,6 +168,7 @@ def _cmd_query(args: argparse.Namespace) -> int:
             min_closure_confidence=args.min_confidence,
             glosses=graph.glossary() if args.glosses else None,
             seeder=seeder,
+            pack=get_pack(args.domain),
         )
 
         print(f"query: {result.query}")
@@ -176,6 +182,7 @@ def _cmd_query(args: argparse.Namespace) -> int:
         print(f"  assembled   {len(result.assembled.node_ids)} nodes / "
               f"{result.assembled.tokens} tokens")
         print(f"  soundness   {result.soundness.summary()}")
+        _print_conflicts(result.conflicts)
 
         if result.closure.skipped:
             print(f"\n  {len(result.closure.skipped)} closure edge(s) not followed:")
@@ -221,6 +228,59 @@ def _cmd_embed(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_extract(args: argparse.Namespace) -> int:
+    from dge.pipeline import extract_bundle, plan_extraction
+
+    bundle_path = Path(args.bundle)
+    if not bundle_path.is_file():
+        print(f"error: no bundle at {bundle_path}", file=sys.stderr)
+        return 2
+
+    if args.dry_run:
+        gate, conflicts = plan_extraction(bundle_path, domain=args.domain)
+        print("dry run — no model called, no key needed")
+        print(f"  sections        {gate.sections_total}")
+        print(f"  would call      {gate.sections_admitted}  "
+              f"({gate.admit_fraction:.1%} of sections)")
+        print(f"  input chars     {gate.chars_admitted:,} / {gate.chars_total:,}  "
+              f"({gate.char_fraction:.1%} — this is the bill)")
+        _print_conflicts(conflicts)
+        return 0
+
+    from dge.adapters.extract_llm import LiteLLMEdgeExtractor
+
+    summary = extract_bundle(
+        bundle_path,
+        LiteLLMEdgeExtractor(model=args.model, temperature=args.temperature),
+        domain=args.domain,
+    )
+    print(f"extracted: {summary.model_id}")
+    print(f"  documents       {summary.documents}")
+    print(f"  gate            {summary.gate.sections_admitted}/{summary.gate.sections_total} "
+          f"sections admitted ({summary.gate.char_fraction:.1%} of characters)")
+    print(f"  model calls     {summary.calls}")
+    print(f"  edges written   {summary.edges_written}")
+    print(f"  discarded       {summary.candidates_rejected}  "
+          f"(evidence span, window, or type check failed)")
+    print(f"  pattern edges   {summary.verified} verified / {summary.unconfirmed} unconfirmed")
+    _print_conflicts(summary.conflicts)
+    if summary.failures:
+        print(f"\n  {len(summary.failures)} section(s) failed:", file=sys.stderr)
+        for failure in summary.failures[:10]:
+            print(f"    - {failure}", file=sys.stderr)
+    return 0
+
+
+def _print_conflicts(conflicts: Sequence[OverrideConflict]) -> None:
+    if not conflicts:
+        return
+    print(f"\n  {len(conflicts)} override conflict(s) FLAGGED — not resolved:")
+    for conflict in conflicts[:10]:
+        print(f"    - {conflict.describe()}")
+    if len(conflicts) > 10:
+        print(f"    ... and {len(conflicts) - 10} more")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="dge", description="Document Graph Engine")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -238,6 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     query.add_argument("query", help="The question to assemble context for")
     query.add_argument("-b", "--bundle", required=True, help="Bundle path (.sqlite)")
+    query.add_argument("--domain", default="legal", help="Domain pack (default: legal)")
     query.add_argument("-k", "--top-k", type=int, default=8, help="Seed set size")
     query.add_argument("--max-tokens", type=int, default=8000,
                        help="Token budget for CONTEXT expansion (closure is unbudgeted)")
@@ -269,6 +330,22 @@ def build_parser() -> argparse.ArgumentParser:
                             "hosted = Voyage AI, needs VOYAGE_API_KEY. Default: local")
     embed.add_argument("--model", default=None, help="Override the provider's default model")
     embed.set_defaults(func=_cmd_embed)
+
+    extract = sub.add_parser(
+        "extract", help="L3: run the model edge extractor over an existing bundle"
+    )
+    extract.add_argument("-b", "--bundle", required=True, help="Bundle path (.sqlite)")
+    extract.add_argument("--model", default=EXTRACT_DEFAULT_MODEL,
+                         help="LiteLLM model string. Provider is config, not a code path: "
+                              "groq/... (GROQ_API_KEY), gemini/... (GEMINI_API_KEY), "
+                              "ollama/... (no key). Default: %(default)s")
+    extract.add_argument("--temperature", type=float, default=0.0)
+    extract.add_argument("--domain", default="legal", help="Domain pack (default: legal)")
+    extract.add_argument("--dry-run", action="store_true",
+                         help="Report what the cost gate would admit and what the "
+                              "deterministic layers already found. No model, no key, "
+                              "no network.")
+    extract.set_defaults(func=_cmd_extract)
 
     return parser
 

@@ -27,7 +27,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
+from dge.domains.legal import DomainPack
 from dge.interfaces import Reranker
+from dge.l3.conflict import OverrideConflict, detect_override_conflicts
 from dge.model import Node
 from dge.retrieval.lexical import LexicalIndex
 from dge.traversal.assemble import AssembledContext, assemble
@@ -76,6 +78,10 @@ class QueryResult:
     context: ContextResult
     assembled: AssembledContext
     soundness: SoundnessReport
+    # Competing override claims touching the assembled context. Reported, never
+    # resolved (docs/07 7.2). Empty unless a pack is passed to `run_query` —
+    # recognising an override claim is pack knowledge, not engine knowledge.
+    conflicts: tuple[OverrideConflict, ...] = ()
 
     @property
     def all_node_ids(self) -> tuple[str, ...]:
@@ -107,6 +113,7 @@ def run_query(
     min_closure_confidence: float = 0.0,
     glosses: Mapping[str, str] | None = None,
     seeder: Seeder | None = None,
+    pack: DomainPack | None = None,
 ) -> QueryResult:
     """Run the full retrieve → closure → context → assemble → verify pipeline.
 
@@ -159,7 +166,20 @@ def run_query(
         min_confidence=min_closure_confidence,
     )
 
-    return QueryResult(query, seeds, closure, context, assembled, soundness)
+    # Conflict findings are derived, not stored (see dge.l3.conflict): they are
+    # recomputed here over the assembled neighbourhood so they cannot go stale,
+    # and reported alongside the soundness verdict because for a clause-level
+    # seed they are the ONLY thing that surfaces a mutual override — closure
+    # traversal reaches the competitor only from the section heading.
+    conflicts: tuple[OverrideConflict, ...] = ()
+    if pack is not None:
+        in_context = set(assembled.node_ids)
+        conflicts = tuple(
+            c for c in detect_override_conflicts(nodes, pack)
+            if in_context.intersection(c.node_ids)
+        )
+
+    return QueryResult(query, seeds, closure, context, assembled, soundness, conflicts)
 
 
 def verify_answer(

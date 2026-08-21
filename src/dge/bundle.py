@@ -485,6 +485,41 @@ def write_node_vectors(
         conn.close()
 
 
+def write_model_edges(path: Path, edges: Sequence[Edge]) -> int:
+    """Insert or replace L3 edges in an EXISTING bundle.
+
+    Same in-place pattern as `write_node_vectors`, and for the same reason: L3
+    runs after the substrate is committed, and re-running it must not force a
+    re-parse. INSERT OR REPLACE keyed on the deterministic `edge_id` is what
+    makes the stage idempotent (CLAUDE.md "definition of done" #1) — running
+    `dge extract` twice over the same bundle converges instead of accumulating
+    duplicate edges under fresh ids.
+
+    This is also the write path for RECONCILED pattern edges, which keep their
+    original `edge_id` precisely so that a verification or a downgrade updates
+    the edge in place rather than leaving both versions in the graph.
+    """
+    now = _now()
+    conn = sqlite3.connect(path)
+    try:
+        with conn:
+            conn.executemany(
+                """INSERT OR REPLACE INTO edges
+                   (edge_id, src, dst, type, class, cross_doc, confidence, provenance,
+                    model_id, prompt_hash, evidence_span, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (e.edge_id, e.src, e.dst, e.type.value, e.cls.value, int(e.cross_doc),
+                     e.confidence, e.provenance.value, e.model_id, e.prompt_hash,
+                     e.evidence_span, now)
+                    for e in edges
+                ],
+            )
+    finally:
+        conn.close()
+    return len(edges)
+
+
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a))

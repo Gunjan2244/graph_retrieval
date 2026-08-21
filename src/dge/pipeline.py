@@ -29,12 +29,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from dge.bundle import open_bundle, write_bundle, write_node_vectors
+from dge.bundle import open_bundle, write_bundle, write_model_edges, write_node_vectors
 from dge.domains.legal import get_pack
 from dge.edges import extract_marker_edges, extract_structural_edges
-from dge.interfaces import Embedder
+from dge.interfaces import EdgeExtractor, Embedder
+from dge.l3.conflict import OverrideConflict, detect_override_conflicts
+from dge.l3.run import L3Report, run_l3
+from dge.l3.sections import DEFAULT_MAX_WINDOW_CHARS, GateReport, apply_gate, group_sections
 from dge.lexicon import extract_terms, link_mentions
-from dge.model import DocStatus, Document, Edge, Node, Term
+from dge.model import DocStatus, Document, Edge, Node, Provenance, Term
 from dge.normalize import MODEL_ID as NORMALIZER_MODEL_ID
 from dge.normalize import DeterministicNormalizer
 from dge.parsing import PlainTextParser, finalize_doc_id
@@ -264,4 +267,144 @@ def embed_bundle(bundle_path: Path, embedder: Embedder) -> EmbedSummary:
         documents_embedded=docs_embedded,
         nodes_embedded=nodes_embedded,
         warnings=tuple(warnings),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractSummary:
+    bundle_path: Path
+    model_id: str
+    documents: int
+    gate: GateReport
+    calls: int
+    edges_written: int
+    candidates_rejected: int
+    verified: int
+    unconfirmed: int
+    conflicts: tuple[OverrideConflict, ...] = field(default_factory=tuple)
+    failures: tuple[str, ...] = field(default_factory=tuple)
+
+
+def plan_extraction(
+    bundle_path: Path, *, domain: str = "legal", max_chars: int = DEFAULT_MAX_WINDOW_CHARS
+) -> tuple[GateReport, tuple[OverrideConflict, ...]]:
+    """What an L3 run WOULD cost, and what the deterministic layers already
+    found, without making a single model call.
+
+    This is the zero-key path. L3 is the dominant cost line (docs/05 5.4), so
+    being able to price a corpus before paying for it is not a convenience —
+    and the conflict findings are deterministic, so they are available here
+    too, with no model and no network.
+    """
+    pack = get_pack(domain)
+    total = GateReport(0, 0, 0, 0)
+    conflicts: list[OverrideConflict] = []
+    with open_bundle(bundle_path) as graph:
+        for doc in graph.documents():
+            if doc.review_state == "pending":
+                continue
+            nodes = graph.nodes_in_doc_order(doc.doc_id)
+            _admitted, report = apply_gate(group_sections(nodes, max_chars=max_chars), pack)
+            total = GateReport(
+                total.sections_total + report.sections_total,
+                total.sections_admitted + report.sections_admitted,
+                total.chars_total + report.chars_total,
+                total.chars_admitted + report.chars_admitted,
+            )
+            conflicts.extend(detect_override_conflicts(nodes, pack))
+    return total, tuple(conflicts)
+
+
+def extract_bundle(
+    bundle_path: Path,
+    extractor: EdgeExtractor,
+    *,
+    domain: str = "legal",
+    max_chars: int = DEFAULT_MAX_WINDOW_CHARS,
+) -> ExtractSummary:
+    """L3b: run the model extractor over an already-ingested bundle.
+
+    A separate entry point from `ingest_documents` for the same reason
+    `embed_bundle` is: L3 is expensive and independently re-runnable, and
+    forcing a re-parse to re-extract would make the expensive layer hostage to
+    the cheap one. Re-running converges rather than accumulating, because
+    `edge_id`s are deterministic (`dge.bundle.write_model_edges`).
+
+    Review-pending documents are skipped outright — CLAUDE.md invariant 9: no
+    downstream layer runs on a substrate that failed its gate, and L3 is the
+    most expensive way to process a document that should not be processed.
+    """
+    pack = get_pack(domain)
+    reports: list[L3Report] = []
+    to_write: list[Edge] = []
+    docs = 0
+
+    with open_bundle(bundle_path) as graph:
+        for doc in graph.documents():
+            if doc.review_state == "pending":
+                continue
+            nodes = graph.nodes_in_doc_order(doc.doc_id)
+            if not nodes:
+                continue
+            existing = [
+                e
+                for node in nodes
+                for e in graph.outgoing(node.node_id)
+                if e.provenance is Provenance.PATTERN
+            ]
+            report = run_l3(
+                nodes, pack, extractor,
+                pattern_edges=existing,
+                doc_summaries={doc.doc_id: doc.source_uri or doc.doc_id},
+                max_chars=max_chars,
+            )
+            reports.append(report)
+            docs += 1
+
+            # A model edge and a pattern edge can describe the SAME relation
+            # under different edge_ids (`model:defines:...` vs
+            # `mention:...`). Both would be written, and a duplicate
+            # (src, dst, type) silently inflates the degree penalty in
+            # `dge.traversal.policy.frontier_score` — the term that exists to
+            # tell hubs apart from genuinely well-connected nodes. This is the
+            # same hazard `_dedupe_edges` guards at ingest; L3 writes bypassed
+            # it because model and reconciled edges arrive as separate lists.
+            #
+            # The pattern edge wins, deliberately: after reconciliation it
+            # carries VERIFIED provenance (pattern-detected AND
+            # model-confirmed), which is strictly stronger evidence than an
+            # unconfirmed model proposal for the identical relation.
+            pattern_keys = {
+                (e.src, e.dst, e.type.value) for e in report.reconciled
+            }
+            to_write.extend(
+                e for e in report.edges
+                if (e.src, e.dst, e.type.value) not in pattern_keys
+            )
+            # Only reconciled edges that actually CHANGED are rewritten; an
+            # untouched pattern edge does not need a new created_at.
+            by_id = {e.edge_id: e for e in existing}
+            to_write.extend(
+                e for e in report.reconciled if by_id.get(e.edge_id) != e
+            )
+
+    written = write_model_edges(bundle_path, to_write) if to_write else 0
+    gate = GateReport(
+        sum(r.gate.sections_total for r in reports),
+        sum(r.gate.sections_admitted for r in reports),
+        sum(r.gate.chars_total for r in reports),
+        sum(r.gate.chars_admitted for r in reports),
+    )
+    return ExtractSummary(
+        bundle_path=bundle_path,
+        model_id=extractor.model_id,
+        documents=docs,
+        gate=gate,
+        calls=sum(r.calls for r in reports),
+        edges_written=written,
+        candidates_rejected=sum(len(r.rejected) for r in reports),
+        verified=sum(r.verified for r in reports),
+        unconfirmed=sum(r.unconfirmed for r in reports),
+        conflicts=tuple(c for r in reports for c in r.conflicts),
+        failures=tuple(f for r in reports for f in r.failures),
     )

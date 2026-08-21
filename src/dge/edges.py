@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from dge.domains.legal import DomainPack, MarkerPattern
+from dge.l3.evidence import check_evidence
 from dge.model import Edge, EdgeType, Node, NodeKind, Provenance
 
 Orientation = Literal["marker_is_src", "marker_is_dst"]
@@ -61,12 +62,28 @@ def _orientation(edge_type: EdgeType) -> Orientation:
 
 
 def validate_evidence_span(evidence_span: str | None, input_window: str) -> bool:
-    """CLAUDE.md invariant 10: an edge whose evidence_span is not verbatim in
-    the input window is discarded. Enforced here in code, applied uniformly to
-    pattern edges and (by any future adapter) model-extracted candidates."""
+    """CLAUDE.md invariant 10 for the PATTERN path — one boolean over the same
+    enforcement point L3 uses (`dge.l3.evidence.check_evidence`), so the two
+    paths cannot drift apart in what "verbatim" means.
+
+    Two deliberate differences from the model path, both because the input is
+    different in kind:
+
+    - `None` passes. A pattern edge's span is produced by our own regex over
+      the node's own text, so its absence means "this rule cites no span",
+      not "this claim has no evidence". A model candidate with no span is
+      discarded outright (`check_evidence` returns REJECTED/"missing") —
+      there, absence IS the failure.
+    - No reflow tolerance and no minimum length: a regex match is by
+      construction an exact slice of the node it matched, so anything less
+      than an exact substring here is a bug in this module, not a model
+      being loose with whitespace.
+    """
     if evidence_span is None:
         return True
-    return evidence_span in input_window
+    return check_evidence(
+        evidence_span, input_window, allow_reflow=False, min_chars=0
+    ).ok
 
 
 @dataclass

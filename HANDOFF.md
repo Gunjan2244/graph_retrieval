@@ -17,6 +17,13 @@ python3 -m dge.cli ingest samples/sample_act.txt -o /tmp/b.sqlite
 python3 -m dge.cli embed  -b /tmp/b.sqlite --provider local
 python3 -m dge.cli query  "transfer made in the ordinary course of business permitted" \
     -b /tmp/b.sqlite -k 1 --use-vectors --show-provenance
+
+# L3. --dry-run needs no key and no network: it prices the corpus through the
+# cost gate and reports the deterministic conflict findings.
+python3 -m dge.cli extract -b /tmp/b.sqlite --dry-run
+# A real run needs ONE free-tier key (see "L3 needs a key" below):
+#   export GROQ_API_KEY=...
+#   python3 -m dge.cli extract -b /tmp/b.sqlite
 ```
 
 Checks, all currently green:
@@ -24,7 +31,7 @@ Checks, all currently green:
 ```bash
 ruff check src scripts tests
 mypy --strict src
-python3 -m pytest tests/ -q          # 72 passed
+python3 -m pytest tests/ -q          # 126 passed
 ```
 
 ---
@@ -42,6 +49,84 @@ that flag.
 
 **The venv is not optional.** `python3` outside it has no mypy, no ruff, no
 fastembed. There is no system-wide install of any of them.
+
+---
+
+## L3 needs a key, and nothing has ever run against a real model
+
+This is the single most important thing to know about the current state.
+Phase 3's machinery is built, typed, and tested — **entirely against fakes**.
+`BUILD_PLAN.md` Phase 3 is ticked for the plumbing and explicitly NOT for the
+exit criterion, because the quality question L3 exists to answer cannot be
+answered by a fake extractor.
+
+**Get one free key.** The recommendation is **Groq** (`GROQ_API_KEY`, from
+console.groq.com): generous free tier, native `json_schema` structured output
+with `strict`, and `groq/llama-3.3-70b-versatile` is already the adapter
+default. Google AI Studio (`GEMINI_API_KEY`, `--model gemini/gemini-3.6-flash`)
+is an equally fine fallback. Provider is a `--model` string, never a code
+path — `src/dge/adapters/extract_llm.py` is the only file in the repo that
+knows litellm exists.
+
+What to run first, and what to look at:
+
+```bash
+python3 -m dge.cli extract -b bundle.sqlite --dry-run     # free, prices it
+python3 -m dge.cli extract -b bundle.sqlite               # needs the key
+```
+
+The number to watch is `discarded` in the output. That is candidates killed by
+the evidence-span / window / enum checks, and it is the honest read on whether
+the model is inventing edges. A discard rate near zero on a real corpus is
+suspicious, not reassuring — check `L3Report.rejected` reasons directly before
+believing it.
+
+---
+
+## The cost gate is much weaker than Phase 0 suggested
+
+Measured on all 62 acts, on the rebuilt substrate
+(`python3 scripts/phase3_gate_report.py`):
+
+| granularity | calls admitted | characters admitted |
+|---|---|---|
+| node | 30.6% | 37.8% |
+| **section (what actually runs)** | **54.0%** | **76.0%** |
+
+Phase 0's 22.3% was a per-node number on the old substrate and does not
+transfer. L3 runs one section per call, a section is admitted if *any* node in
+it carries *any* gate term, and the admitted sections are the long ones — so
+the gate skips 46% of calls but only 24% of the bill.
+
+Do not "fix" this in the engine; the gate is pack data and the boundary is
+invariant 11. The lever is `LEGAL_GATE_TERMS`: 178 of 1272 admitted sections
+are admitted by `'provided'` alone and 146 by `'subject to'` alone. Neither has
+been precision-checked, and tightening them is the first real cost move
+(BUILD_PLAN Phase 6).
+
+---
+
+## Open design question this phase deliberately did NOT decide
+
+Should a closure relation asserted against a *section* propagate to that
+section's *children*?
+
+It came up while representing non obstante conflicts and it is load-bearing.
+A `referenced` marker resolves to the named section's HEADING node, while the
+clause making the claim is a sub-section. So for two mutually-overriding
+provisions the closure cycle is between the two sections, not the two clauses,
+and:
+
+- seeding a **section heading** reaches the competitor on the reverse index —
+  the guarantee holds;
+- seeding the **bare clause** does not, because the only path runs through
+  `part_of`, which is a budgeted CONTEXT edge.
+
+Both halves are pinned in `tests/test_conflict.py` so this cannot quietly be
+assumed away. The obvious fix — making `part_of` closure-traversable — would
+unify the budgeted and unbudgeted halves of traversal behind one mechanism,
+which CLAUDE.md invariant 6 forbids doing casually. It needs its own decision
+with its own evidence, not a side effect of the conflict module.
 
 ---
 
@@ -66,12 +151,15 @@ as gap 1. Reranker is now built (`Reranker` protocol, local fastembed adapter +
 hosted Voyage `/v1/rerank` adapter, wired behind `--rerank` on `dge query`),
 so L2 is `[x]` in `BUILD_PLAN.md`.
 
-**Sandbox note, not a code issue:** this sandbox's `/tmp` is a 3.6G tmpfs.
-`bge-reranker-base` is ~1GB and downloading it there via fastembed's default
-cache path (`$TMPDIR/fastembed_cache`) can exhaust it mid-download ("disk
-quota exceeded"). Point `FASTEMBED_CACHE_PATH` at a real-disk directory (or
-pass `cache_dir=` to the adapter) if that happens — it's an artifact of this
-environment's `/tmp` sizing, not something the adapter code should special-case.
+**`bge-reranker-base` is now downloaded, verified, and cached at
+`/home/someone_practicing/.cache/fastembed`** — not `/tmp` (a 3.6G tmpfs that
+exhausts mid-download on a ~1GB file). `dge query --rerank` has run live and
+correctly ranked real candidates. Full account of what it took (three
+attempts: a silent-incomplete download, a stalled connection recovered with
+`curl -C - --speed-limit ... --retry`, and an `HF_HUB_OFFLINE` sequencing
+gotcha specific to fastembed's cross-encoder loader) is in `README.md`'s
+"fastembed's model cache" section — read that before touching this again on a
+fresh machine.
 
 ---
 
@@ -179,6 +267,7 @@ make hand-transcription silently fail the verbatim check.
 
 | Area | Files |
 |---|---|
+| L3 (Phase 3) | `src/dge/l3/{evidence,sections,prompt,schema,run,conflict}.py`, `src/dge/adapters/extract_llm.py`, `scripts/phase3_gate_report.py` |
 | Phase 0 corpus + validation | `scripts/fetch_corpus.py`, `scripts/phase0_density.py`, `scripts/phase0_taxonomy.py`, `corpus/` |
 | Traversal (the differentiator) | `src/dge/traversal/{graph,expand,assemble,soundness}.py` |
 | Bundle read side | `BundleGraph` / `open_bundle` in `src/dge/bundle.py` |
@@ -186,7 +275,17 @@ make hand-transcription silently fail the verbatim check.
 | L2 adapters | `src/dge/adapters/{embed_local,embed_hosted,rerank_local,rerank_hosted}.py` |
 | CLI | `src/dge/cli.py` — `ingest`, `embed`, `query` (`--use-vectors`, `--rerank`) |
 
-The load-bearing test is
+L3's load-bearing test file is `tests/test_evidence.py` — it is the enforcement
+of CLAUDE.md invariant 10 and it was written before any model call existed,
+because every model-extracted edge in the system is worth exactly what that
+check is worth. The case to preserve above all others is
+`test_recovered_span_always_slices_the_window_for_every_accepted_case`: it is
+what makes accepting a whitespace-reflowed match safe rather than a quiet
+loosening of the invariant. If evidence spans ever stop being slices of the
+window, `edges.evidence_span` stops being checkable against the immutable
+bytes and invariant 10 is enforced by nothing.
+
+The load-bearing traversal test is
 `tests/test_traversal.py::test_exception_is_only_reachable_via_the_reverse_index`.
 Deleting the `incoming()` walk in `closure_neighbors` fails 7 tests including
 every soundness test — verified, not assumed. If that walk is ever refactored,

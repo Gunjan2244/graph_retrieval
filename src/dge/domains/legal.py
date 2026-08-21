@@ -48,6 +48,35 @@ class MarkerPattern:
     note: str = ""
 
 
+class ClaimScope(StrEnum):
+    """How far a provision's override claim reaches.
+
+    Engine-level vocabulary — it is about graph reachability, not law — but the
+    PATTERNS that recognise each scope are pack data (`override_scopes` below),
+    because "notwithstanding anything contained in this Act" is a drafting
+    convention, not a fact about graphs. `dge.l3.conflict` knows that two
+    provisions each claiming to override the other is a conflict; it does not
+    know a single word of English legal phrasing.
+    """
+
+    SECTION = "section"        # reaches one named provision
+    DOCUMENT = "document"      # reaches everything in this document
+    EXTERNAL = "external"      # reaches another instrument entirely
+    UNRESOLVED = "unresolved"  # an override marker with no readable scope
+
+
+@dataclass(frozen=True, slots=True)
+class OverrideScopePattern:
+    """Matched against the text immediately FOLLOWING an override marker.
+
+    Order matters: the first pattern that matches wins, so put the narrow ones
+    ("any other law for the time being in force") before the broad ones.
+    """
+
+    regex: Pattern[str]
+    scope: ClaimScope
+
+
 @dataclass(frozen=True, slots=True)
 class StructuralUnit:
     """A genre-specific structural element with a fixed relation to its parent.
@@ -71,6 +100,7 @@ class DomainPack:
     definition_patterns: Sequence[Pattern[str]]
     citation_patterns: Sequence[Pattern[str]]
     gate_terms: Sequence[str] = field(default_factory=tuple)
+    override_scopes: Sequence[OverrideScopePattern] = field(default_factory=tuple)
     notes: str = ""
 
     def should_run_l3(self, text: str) -> bool:
@@ -180,12 +210,18 @@ LEGAL_MARKERS: tuple[MarkerPattern, ...] = (
     MarkerPattern(
         "non_obstante",
         re.compile(
-            r"notwithstanding\s+anything\s+(?:contained\s+)?"
-            r"(?:to\s+the\s+contrary\s+)?(?:in|under)\b", I),
+            r"notwithstanding\s+anything\s+"
+            r"(?:contained\s+|to\s+the\s+contrary\s+)*(?:in|under)\b", I),
         EdgeType.SUPERSEDES, Confidence.STRONG, "referenced",
         note="Overrides the referenced provision. Resolve the reference to a node "
              "and write `overrides`. Two competing non obstante clauses is a real "
-             "conflict — flag it, do not silently pick one.",
+             "conflict — flag it, do not silently pick one. The qualifiers repeat "
+             "in either order in real drafting: the original pattern required "
+             "'contained' before 'to the contrary' and so missed 'notwithstanding "
+             "anything TO THE CONTRARY CONTAINED in this Act' entirely — 170 -> 181 "
+             "matches across the 62-act corpus once both orders are allowed "
+             "(Phase 3, verified against Ajmer_Tenancy_and_Land_Records_Act,_1950, "
+             "where the miss was suppressing real override conflicts).",
     ),
     MarkerPattern(
         "subject_to",
@@ -363,6 +399,41 @@ LEGAL_CITATIONS: tuple[Pattern[str], ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Override scopes — how far a non obstante clause reaches
+#
+# Matched against the text immediately after a SUPERSEDES-typed marker, i.e.
+# after "notwithstanding anything contained in". The scope is the whole game:
+# "...in section 9" competes with one provision, "...in this Act" competes with
+# every other act-wide claim in the document, and "...in any other law for the
+# time being in force" competes with nothing inside this corpus at all.
+#
+# First match wins, so the narrow phrasings are listed first. Anything that
+# matches none of these is ClaimScope.UNRESOLVED and is never flagged as a
+# conflict — a repeal clause or an amendment marker also carries a SUPERSEDES
+# edge type but has no override scope, and must not be mistaken for one.
+# ---------------------------------------------------------------------------
+
+LEGAL_OVERRIDE_SCOPES: tuple[OverrideScopePattern, ...] = (
+    OverrideScopePattern(
+        re.compile(r"\s*any\s+other\s+(?:law|enactment|Act)\b", I), ClaimScope.EXTERNAL,
+    ),
+    OverrideScopePattern(
+        re.compile(r"\s*(?:the\s+)?[A-Z][A-Za-z\s,()]{4,60}\s+Act,?\s+(?:19|20)\d{2}\b"),
+        ClaimScope.EXTERNAL,
+    ),
+    OverrideScopePattern(
+        re.compile(r"\s*(?:the\s+provisions\s+of\s+)?(?:sub-)?section\s+\d+[A-Za-z]*", I),
+        ClaimScope.SECTION,
+    ),
+    OverrideScopePattern(
+        re.compile(r"\s*(?:the\s+(?:other\s+)?provisions\s+of\s+)?this\s+"
+                   r"(?:Act|Chapter|Part|Agreement)\b", I),
+        ClaimScope.DOCUMENT,
+    ),
+)
+
+
 # Cost gate. Sections with none of these rarely carry closure relations.
 LEGAL_GATE_TERMS: tuple[str, ...] = (
     "provided", "notwithstanding", "subject to", "except", "unless",
@@ -380,6 +451,7 @@ LEGAL_PACK = DomainPack(
     definition_patterns=LEGAL_DEFINITIONS,
     citation_patterns=LEGAL_CITATIONS,
     gate_terms=LEGAL_GATE_TERMS,
+    override_scopes=LEGAL_OVERRIDE_SCOPES,
     notes="Covers Indian statutory text, judgments, and commercial contracts. "
           "See docs/07-legal-domain-pack.md for the semantics behind each edge type.",
 )
