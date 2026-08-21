@@ -133,3 +133,8 @@ Two deployment targets, one schema. Keep everything expressible in portable SQL.
   similarity is never a typed edge.
 - "Run L3 over every section." Gate on assertive propositions and lexical
   exception markers. L3 is the dominant cost line.
+
+
+## Log your decisions with reasons
+
+every major decisions should be logged in decisions.md file

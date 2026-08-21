@@ -51,6 +51,31 @@ DEFAULT_MODEL = "groq/llama-3.3-70b-versatile"
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
 
 
+def _is_transient(exc: Exception) -> bool:
+    """Is this "the provider is busy" rather than "the provider cannot do this"?
+
+    The structured-output latch below is one-way, so what trips it matters. A
+    429 or a 503 says nothing at all about schema support, and treating one as
+    proof of it degraded an entire real corpus run to JSON mode after a single
+    rate limit — which then produced a response using `rel_type` instead of
+    `type` and lost the section outright. Transient failures propagate to
+    `dge.l3.run`, which records them as a failed section; only a request the
+    provider actually rejected flips the latch.
+
+    Read off `status_code` when the exception carries one (LiteLLM's exception
+    hierarchy does, whatever the vendor) and fall back to the class name, so
+    this stays vendor-neutral and needs no litellm import at module scope.
+    """
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int) and (status == 429 or status >= 500):
+        return True
+    name = type(exc).__name__
+    return name in {
+        "RateLimitError", "ServiceUnavailableError", "InternalServerError",
+        "APIConnectionError", "APIError", "Timeout", "APITimeoutError",
+    }
+
+
 class ExtractorError(RuntimeError):
     pass
 
@@ -101,7 +126,11 @@ class LiteLLMEdgeExtractor:
         try:
             response = litellm.completion(**kwargs)
         except Exception as exc:
-            if not self._structured_output:
+            if not self._structured_output or _is_transient(exc):
+                # A rate limit, a 503 or a dead socket is not evidence about
+                # schema support. Let it through as a failed section rather
+                # than spending a second call AND permanently downgrading
+                # every remaining call in the run.
                 raise
             # One-way latch: a provider that cannot do json_schema will not
             # start being able to mid-run, and retrying it per section would

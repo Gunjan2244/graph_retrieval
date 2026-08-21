@@ -98,3 +98,75 @@ def test_wire_schema_closes_both_the_type_enum_and_the_label_enum(nodes):
     props = schema["$defs"]["ExtractedEdge"]["properties"]
     assert props["type"]["enum"] == ["exception_of", "supersedes", "defines", "none"]
     assert props["src_ref"]["enum"] == list(ref_labels(nodes))
+
+
+# ---------------------------------------------------------------------------
+# The structured-output latch: what is allowed to trip it
+# ---------------------------------------------------------------------------
+
+
+class _Rate(Exception):
+    status_code = 429
+
+
+class _Refused(Exception):
+    """What a provider without json_schema support actually returns: a 400."""
+
+    status_code = 400
+
+
+def _fake_litellm(monkeypatch, responses):
+    """Install a stand-in `litellm` module whose `completion` pops `responses`.
+
+    Drives the REAL `_complete`, which is the only way to exercise the latch —
+    the other tests in this file replace `_complete` wholesale.
+    """
+    import sys
+    import types
+
+    seen: list[dict] = []
+    module = types.ModuleType("litellm")
+
+    def completion(**kwargs):
+        seen.append(kwargs)
+        outcome = responses.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return types.SimpleNamespace(
+            choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=outcome))]
+        )
+
+    module.completion = completion  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "litellm", module)
+    return seen
+
+
+def test_a_rate_limit_does_not_permanently_downgrade_the_run_to_json_mode(nodes, monkeypatch):
+    """Measured on the first real corpus run.
+
+    One 429 flipped `_structured_output` off for the whole pass; a later
+    section then came back using `rel_type` instead of `type` and was lost to
+    a validation error. A 429 is evidence about the provider's load, never
+    about its schema support, so it must propagate as a failed section (which
+    `dge.l3.run` records) and leave the latch alone.
+    """
+    seen = _fake_litellm(monkeypatch, [_Rate("429"), '{"edges": []}'])
+    extractor = LiteLLMEdgeExtractor(model="fake/recorded")
+
+    with pytest.raises(_Rate):
+        extractor.extract(nodes, "Section 12", "test doc")
+    assert len(seen) == 1, "a 429 must not be retried into a second billed call"
+    assert extractor._structured_output is True
+
+    assert extractor.extract(nodes, "Section 12", "test doc") == []
+    assert seen[-1]["response_format"]["type"] == "json_schema"
+
+
+def test_a_provider_that_rejects_the_schema_still_falls_back_to_json_mode(nodes, monkeypatch):
+    seen = _fake_litellm(monkeypatch, [_Refused("no json_schema"), '{"edges": []}'])
+    extractor = LiteLLMEdgeExtractor(model="fake/recorded")
+
+    assert extractor.extract(nodes, "Section 12", "test doc") == []
+    assert extractor._structured_output is False
+    assert seen[0]["response_format"]["type"] == "json_schema"
+    assert seen[1]["response_format"] == {"type": "json_object"}

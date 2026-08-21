@@ -15,6 +15,8 @@ fix it: the missing text is *structurally* related to the query, not
 *semantically similar* to it. So the two jobs are split. Embeddings find what a
 passage is **about**; typed edges record how passages **govern each other**.
 
+- **`NEXT_STEPS.md`** — **start here.** Current status, the exact environment
+  incantation, and a ready-to-paste prompt for the next task.
 - **`CLAUDE.md`** — invariants and anti-goals. Read before writing code.
 - **`BUILD_PLAN.md`** — every task, with evidence for what's done.
 - **`HANDOFF.md`** — environment traps and open questions.
@@ -26,14 +28,14 @@ passage is **about**; typed edges record how passages **govern each other**.
 
 ## Status: 15 of 40 tasks done
 
-127 tests pass; `mypy --strict` and `ruff` are clean.
+133 tests pass; `mypy --strict` and `ruff` are clean.
 
 | Phase | State |
 |---|---|
 | 0 · Validate the assumption | **Passed.** Closure chains are sparse on real data |
 | 1 · Substrate + baseline retrieval | Mostly done — L1 normalizer still missing |
 | 2 · Term symbol table | **Not started** (7 tasks) |
-| 3 · Closure edges + soundness | Machinery built; **exit criterion not met** |
+| 3 · Closure edges + soundness | Soundness half **met and measured**; recall half **not met** — the extractor is short |
 | 4 · MCP tool surface | **Not started** (2 tasks) |
 | 5 · Cross-document | Not started (6 tasks) — post-MVP |
 | 6 · Cost and scale | Not started (4 tasks) — post-MVP |
@@ -59,21 +61,40 @@ exception-to-the-exception. A flat-RAG answer citing only the rule is reported
   tiny fragments are all rejected, and every accepted span is stored as a
   verbatim slice of the substrate — not the model's rendering of it
 
-### L3 has now run against a real model — once, on one document
+### L3 has now run on real acts, and Phase 3's exit is half met
 
-First live extraction: `gemini/gemini-3.6-flash` on `samples/sample_act.txt`.
-2 calls, 3 edges written, 0 discarded, 1 pattern edge verified. The edges were
-hand-checked and are correct: proviso → rule, usage → definition (right
-direction), and savings-clause → repeal, which is the relation `docs/07` §
-repeal/savings exists for.
+Measured 2026-08-21 on real Indian bare acts, not a fixture. Reproduce the
+whole thing with no key and no network:
 
-**That is one small synthetic document, not evidence of extraction quality.**
-`BUILD_PLAN.md` Phase 3 is still **EXIT NOT MET**. The exit criterion is
-soundness violation rate = 0 plus measurable improvement over the Phase 1
-baseline on the labeled failure set, and none of that has been measured.
+```bash
+python scripts/phase3_exit_report.py --bundle bundle.sqlite
+```
 
-A zero discard rate on a clean 11-node fixture is expected, not reassuring. On
-a real act it would be suspicious — see "What to do next".
+**Met — soundness violation rate = 0**, over 170 real queries on a 9-act
+bundle. The check is demonstrably not vacuous: run against a seeds-only
+(flat-RAG) context it reports **128/170 = 75.3% UNSOUND**, 427 violations.
+That contrast is the product claim, measured.
+
+**Not met — traversal does not beat the Phase 1 baseline.** On all 15 labeled
+failure cases, seeds-only reaches 10/15 and the full pipeline 11/15; on the
+five `lost_exception` cases both arms reach 3/5. The single case traversal
+added came from the context frontier, not a closure edge. Per `docs/06` §6.3
+that points at the **extractor**, not the traversal policy, and the traversal
+policy was left alone.
+
+The mechanism is traced, not guessed: on the Child Labour case retrieval ranks
+"7. HOURS AND PERIOD OF WORK" and "8. WEEKLY HOLIDAYS" at 3 and 4 — the seeds
+are right — and the carve-out that answers the question has **zero inbound
+edges**, because L3's one-section-per-call window cannot express a link to a
+section it was never shown. Full evidence, per-edge-type precision, and the
+three bugs the run exposed are in `BUILD_PLAN.md` Phase 3; the reasoning is in
+`decisions.md`.
+
+**Free-tier reality check:** the quota is
+`GenerateRequestsPerDayPerProjectPerModel-FreeTier` = **20 requests per day,
+per model** — confirmed on both `gemini-3.6-flash` and `gemini-2.5-flash`. A
+49-call run over five small acts gets ~19 through. Pricing with `--dry-run`
+first is still right, but the wall is requests/day, not tokens.
 
 **`--rerank` has now run live**, offline, against the real
 `BAAI/bge-reranker-base` model. Verified: rerank ranked a return-window rule
@@ -89,7 +110,7 @@ machine.
 ```bash
 source .venv/bin/activate          # deps live here; system python has none of them
 export PYTHONPATH=src
-export HF_HUB_OFFLINE=1            # embedding model is cached; without this fastembed hangs
+export HF_HUB_OFFLINE=1            # reranker is cached; see the cache note below
 
 python3 -m dge.cli ingest samples/sample_act.txt -o /tmp/b.sqlite
 python3 -m dge.cli embed  -b /tmp/b.sqlite --provider local
@@ -110,10 +131,19 @@ ruff check src scripts tests && mypy --strict src && python3 -m pytest tests/ -q
 
 ## fastembed's model cache — where it's stored and how it actually resolves
 
-Both local models (`BAAI/bge-large-en-v1.5` for embeddings, `BAAI/bge-reranker-base`
-for rerank) are cached at `/home/someone_practicing/.cache/fastembed` — **not**
-inside the repo, and **not** `/tmp` (which is a small tmpfs and will run out of
-space mid-download). Set `FASTEMBED_CACHE_PATH` to that path if it's ever unset.
+`BAAI/bge-reranker-base` (rerank) is cached at
+`/home/someone_practicing/.cache/fastembed` — **not** inside the repo, and
+**not** `/tmp` (a small tmpfs that exhausts mid-download). Set
+`FASTEMBED_CACHE_PATH` to that path if it's ever unset.
+
+**`BAAI/bge-large-en-v1.5` (embeddings) is NOT cached.** An earlier version of
+this file said it was; the 4.8G in `~/.cache/huggingface` is `microsoft/phi-4`,
+unrelated. `dge embed` and `dge query --use-vectors` therefore do not work on
+this machine right now — they fail with `Could not load model
+BAAI/bge-large-en-v1.5 from any source`. Two download attempts on 2026-08-21
+died on the network stall described below (once inside HF's xet CAS client,
+once with `HF_HUB_DISABLE_XET=1` on a plain connection reset). Seeding it needs
+the same `curl -C - --speed-limit ... --retry` treatment the reranker needed.
 
 Getting `bge-reranker-base` (1.06GB) cached took three real attempts, worth
 knowing if this ever needs redoing on a new machine:

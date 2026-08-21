@@ -385,22 +385,178 @@ operation.
 improve measurably over the Phase 1 baseline. Beat Phase 1 on the labeled
 failure set by a clear margin — if not, fix the extractor, not the policy.
 
-**EXIT NOT MET.** Every mechanism above is built and tested; none of the
-numbers the exit asks for exist yet, and a fake model cannot produce them.
-What is blocking, in order:
+**Fixed after the first live run (2026-08-21):** L3 wrote a model edge and a
+pattern edge describing the SAME (src, dst, type) under different edge_ids
+(`model:defines:...` vs `mention:...`). Both landed, and a duplicate silently
+inflates the degree penalty in `dge.traversal.policy.frontier_score` — the term
+that exists to tell hubs apart from genuinely well-connected nodes (measured:
+degree 6 vs 5 unique relations, a 20% inflation on that node). This is the same
+hazard `_dedupe_edges` guards at ingest; L3 bypassed it because model and
+reconciled edges arrive as separate lists. Fixed in `dge.pipeline.extract_bundle`;
+the reconciled pattern edge wins, because after reconciliation it carries
+VERIFIED provenance (pattern-detected AND model-confirmed), which is strictly
+stronger evidence than an unconfirmed model proposal for the identical relation.
+Pinned by `test_model_edge_does_not_duplicate_an_existing_pattern_relation` and
+verified falsifiable — reverting the fix fails the test.
 
-1. **No real model has ever run.** No key is set. `dge extract --dry-run`
-   works today with zero keys; a real run needs one free-tier key —
-   **Groq (`GROQ_API_KEY`, console.groq.com) is the recommendation**:
-   generous free tier, native `json_schema` structured output, and
-   `groq/llama-3.3-70b-versatile` is already the adapter's default. Google AI
-   Studio (`GEMINI_API_KEY`, `gemini/gemini-3.6-flash`) is the fallback and
-   also works — a one-word `--model` change, not a code change.
-2. **The labeled failure set is 15/50** (Phase 0, still open). Without it
-   there is nothing to measure "beat Phase 1 by a clear margin" against.
-3. **The eval harness that would produce the seed / expansion / never-reached
-   split** (Standing instrumentation, below) is not built. `eval_traces`
-   exists in `sql/schema.sql` and nothing writes to it.
+**EXIT NOT MET — now measured rather than assumed (2026-08-21).**
+Half the criterion is met; the other half is not, and the reason is the
+extractor. Reproduce all of it with
+`python scripts/phase3_exit_report.py --bundle <b>.sqlite` (no key, no
+network — it replays the graph the bundle already holds).
+
+**MET: soundness violation rate = 0.** 170 real queries over a 9-act bundle,
+0 unsound. Falsified, not merely asserted: the identical check against a
+seeds-only (flat-RAG) context is UNSOUND on **128/170 = 75.3%** with 427
+violations. Without that second number the zero would only prove the check
+never fires.
+
+**NOT MET: exception recall / stale-answer rate do not beat the Phase 1
+baseline.** Three arms over the SAME seeds on all 15 labeled failure cases:
+
+    A  seeds only (docs/06 6.3 baseline 2)      10/15 gold reached
+    B  seeds + CONTEXT expansion                11/15
+    C  seeds + CLOSURE + CONTEXT (full)         11/15
+
+    lost_exception   A 3/5   B 3/5   C 3/5   <- the ones Phase 3 exists for
+    wrong_version    A 2/2   B 2/2   C 2/2
+
+**Closure traversal changed no labeled case.** The one case traversal added
+arrived on the CONTEXT frontier, not through a closure edge. docs/06 6.3 is
+explicit about what that means: fix the EXTRACTOR, not the traversal policy.
+
+**Why, mechanically — traced, not guessed.** On the Child Labour case the
+seeds are *right*: ranks 3 and 4 are literally "7. HOURS AND PERIOD OF WORK"
+and "8. WEEKLY HOLIDAYS". The carve-out that answers the question — "(3)
+Nothing in Secs . 7, 8 and 9 shall apply to any establishment wherein any
+process is carried on by the occupier with the aid of his family" — has
+**zero inbound edges**, so reverse traversal from those seeds cannot reach
+it. Its only outgoing `exception_of` edges point at Sec. 9's sub-sections
+(1) and (2), which are simply the units that happened to share the L3 window.
+Two extractor causes, both real:
+
+  - **L3's one-section-per-call window makes a cross-section exception
+    unrepresentable.** The model can only propose edges between units it was
+    shown, and `validate_candidate` correctly rejects anything else. A
+    carve-out naming ss. 7, 8 and 9 from inside s. 9 can never be linked to
+    ss. 7 and 8.
+  - **`_resolve_target`'s `referenced` hint takes one match from `_REF_RE`,
+    which does not handle the plural/list form.** "Secs . 7, 8 and 9" yields
+    no target at all.
+
+Corpus-wide (60 acts), the split matters:
+
+    SELF-REFERENTIAL (proviso, "nothing in this section")   463/521 linked (89%)
+    CROSS-REFERENCE  ("nothing in section 28")                5/8  linked (62%)
+
+The deterministic layer handles the common proviso well. The cross-reference
+form is the leaky one, and it is the form two of the five labeled
+`lost_exception` cases depend on — including `Mines_Act,_1952` s. 37
+("Nothing in section 28, section 30, section 31, section 34 ... shall apply
+to persons ... employed in a supervising capacity"), which is verbatim one
+of the taxonomy's own cases.
+
+**Per-edge-type precision, hand-checked, never aggregated (docs/06 6.3).**
+Model (L3) edges exist for one document only — see the quota note below.
+
+    MODEL edges (gemini-2.5-flash / gemini-3.6-flash, Child Labour Act)
+      exception_of   5 distinct relations, both models found all 5      5/5
+      defines        3 distinct relations; 3.6-flash 2/2 correct,
+                     2.5-flash 1/3 — it emitted DEFINITION -> USE twice,
+                     and DEFINES traverses FORWARD, so a reversed edge
+                     means seeding the use never reaches the definition    3/5
+      supersedes     0 proposed in 37 successful calls — UNMEASURABLE
+
+    DETERMINISTIC edges (the bulk of the graph)
+      exception_of / structural   20/20   proviso -> the provision it qualifies
+      supersedes   / pattern        1/1   "notwithstanding ... section 6" -> s.6
+      amends       / pattern        3/3
+      defines      / pattern       17/20  2 wrong: one proper-noun false
+                                          positive ("Child Labour Technical
+                                          Advisory Committee" -> def. of
+                                          "child"), one garbage source node
+      defines      / structural    11/15  systematic: an Explanation is
+                                          attached to its PRECEDING SIBLING,
+                                          but it qualifies the whole section,
+                                          so the provisions that actually use
+                                          the term do not reach it
+      exception_of / pattern         n=4  1 clearly wrong: "(6) The provisions
+                                          of sub-sections (1), (2) and (4)
+                                          shall not apply" resolved to (5)
+
+`exception_of` is in good shape where the target is local, and the sample
+target of 20 was met for the structural population. It was NOT met for any
+model population — see below.
+
+**`discarded` was 0, and the reason is not reassuring.** Across 37 successful
+calls on real statutory text: 15 candidates, **0 discarded**, 0 unresolvable
+labels. But 74–78% of calls returned `{"edges": []}` and the model proposed
+~0.4 edges per call. So the checks are not firing because there is almost
+nothing to reject — under-extraction, not a permissive prompt and not
+echoing. With n=15 candidates this does not license any claim that the
+evidence-span validator is well calibrated on real text; it is simply
+untested at volume.
+
+**What is still blocking, in order:**
+
+1. **Free-tier quota, and it is much harder than "generous".** The key's
+   limit is `GenerateRequestsPerDayPerProjectPerModel-FreeTier`,
+   **quotaValue 20 — twenty requests per day, per model.** Verified on both
+   `gemini-3.6-flash` and `gemini-2.5-flash`. A 49-call run over five small
+   acts gets ~19 calls through and 429s the remaining 30. Pricing first was
+   right and did not help: the wall is requests/day, not tokens. Getting
+   ≥20 model edges per type — what docs/06 6.3 asks for — needs a paid key
+   or a second provider (Groq was the original recommendation and remains
+   untried; no `GROQ_API_KEY` is set).
+2. **L3 has model edges for 1 of 9 documents.** Everything above therefore
+   measures a mostly-deterministic graph. The negative result stands for
+   what was measurable, but "the graph does not beat the baseline" is not
+   yet a verdict on a fully-extracted graph.
+3. **Seeding was lexical, not hybrid + rerank.** `BAAI/bge-large-en-v1.5` is
+   NOT cached on this machine (README claimed otherwise; the 4.8G in
+   `~/.cache/huggingface` is `microsoft/phi-4`), and two download attempts
+   died on the documented network stall. This makes the baseline WEAKER than
+   docs/06 6.3 baseline 2, which can only flatter traversal — so the
+   negative conclusion is robust to it, though the absolute recall numbers
+   will move.
+4. **The labeled failure set is 15/50** (Phase 0, still open). All 15 are now
+   measured; the margin question deserves more than 15 cases.
+5. **The eval harness still does not write `eval_traces`.** The three-way
+   split is computed in `scripts/phase3_exit_report.py` and printed, not
+   persisted.
+
+**Three bugs the first real corpus run exposed, all fixed and all pinned by
+a test that fails when the fix is reverted:**
+
+- **A failed call marked its section "examined".** `Foreign_Marriage_Act,_1969`
+  completed **0** successful calls and still had **28** MEDIUM pattern edges
+  halved to 0.3, below the 0.5 traversal floor — 110 across the run. A
+  transient 429 was silently rewriting the graph, which is the "cost gate's
+  mood" failure `dge/l3/run.py`'s own docstring rules out and a breach of
+  invariant 8: the graph must be a function of the corpus, not of the
+  network. Nodes are now marked examined only after the call returns.
+  (`test_medium_marker_in_a_section_whose_call_FAILED_is_left_alone`)
+- **Reconciliation degraded edges the model could not possibly have
+  proposed.** It checked only that `edge.src` was examined, never that both
+  endpoints shared one window — but L3 shows one section per call. On the
+  Child Labour Act **17 of 21** degraded edges were cross-section `defines`
+  links from a provision to the Sec. 2 definition of a term it uses: the
+  most valuable edges in the graph, disabled by a denial inferred from a
+  question never asked. Now requires both endpoints in one examined window;
+  unconfirmed on that document drops 21 -> 4.
+  (`test_a_pattern_edge_across_two_sections_is_not_degraded_by_a_model_that_never_saw_both`)
+- **The structured-output latch tripped on a 429.** One rate limit flipped
+  `_structured_output` off for the whole pass; a later section then answered
+  with `rel_type` instead of `type` and was lost to a validation error. A
+  429 is evidence about load, never about schema support. Transient errors
+  (429, 5xx, timeouts, connection failures) now propagate as a recorded
+  section failure and leave the latch alone; a 400-class rejection still
+  falls back to JSON mode.
+  (`test_a_rate_limit_does_not_permanently_downgrade_the_run_to_json_mode`)
+
+Also environmental, and it cost a whole run: **`tenacity` was not installed**,
+so litellm's `num_retries=2` raised `tenacity import failed` instead of
+retrying. Now installed; worth adding to the `llm` extra.
 
 ---
 

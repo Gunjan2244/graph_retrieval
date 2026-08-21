@@ -383,3 +383,64 @@ def test_medium_marker_in_a_gated_out_section_is_left_alone():
     # No model formed an opinion, so the graph must not pretend one did.
     assert out == medium
     assert report.unconfirmed == 0
+
+
+def test_medium_marker_in_a_section_whose_call_FAILED_is_left_alone():
+    """A 429 is not a model opinion.
+
+    Measured on the first real corpus run: `Foreign_Marriage_Act,_1969`
+    completed 0 successful calls and still had 28 MEDIUM pattern edges halved
+    to 0.3, below the default traversal floor — because the section's nodes
+    were marked examined before the call rather than after it. That makes the
+    graph a function of the network's weather rather than of the corpus
+    (CLAUDE.md invariant 8), and it is the same thing
+    `test_medium_marker_in_a_gated_out_section_is_left_alone` forbids for the
+    gate: no opinion means no change.
+    """
+    nodes, _struct = _nodes()
+    proviso, rule = _proviso_and_rule(nodes)
+    medium = Edge(
+        edge_id="marker:test:medium", src=proviso.node_id, dst=rule.node_id,
+        type=EdgeType.EXCEPTION_OF, provenance=Provenance.PATTERN, confidence=0.6,
+        evidence_span="Provided that",
+    )
+
+    class RateLimited(RecordingExtractor):
+        def extract(self, section_nodes, section_path, doc_summary):  # type: ignore[no-untyped-def]
+            super().extract(section_nodes, section_path, doc_summary)
+            raise RuntimeError("429 rate limited")
+
+    report = run_l3(nodes, PACK, RateLimited(), pattern_edges=[medium])
+    out = next(e for e in report.reconciled if e.edge_id == "marker:test:medium")
+    assert out == medium, "a failed call must not degrade a pattern edge"
+    assert report.unconfirmed == 0
+    assert report.calls == 0
+    assert report.failures
+
+
+def test_a_pattern_edge_across_two_sections_is_not_degraded_by_a_model_that_never_saw_both():
+    """The most common `defines` edge in a statute, and it was being disabled.
+
+    L3 shows one section per call and `validate_candidate` rejects any
+    endpoint outside that window, so a link from a provision in Sec. 12 to a
+    term defined in Sec. 2 cannot be confirmed by any answer the model is
+    capable of giving. Degrading it reads a denial into a question that was
+    never asked.
+
+    Measured on Child_Labour_(Prohibition_and_Regulation)_Act,_1986: 17 of the
+    21 degraded pattern edges were exactly this shape.
+    """
+    nodes, _struct = _nodes()
+    proviso, _rule = _proviso_and_rule(nodes)
+    # Deliberately across the section boundary: the target is in Section 20,
+    # which the gate never admits, so no window ever holds both endpoints.
+    far = next(n for n in nodes if "This Act may be called" in n.raw)
+    medium = Edge(
+        edge_id="marker:test:cross-section", src=proviso.node_id, dst=far.node_id,
+        type=EdgeType.DEFINES, provenance=Provenance.PATTERN, confidence=0.8,
+    )
+
+    report = run_l3(nodes, PACK, RecordingExtractor(), pattern_edges=[medium])
+    out = next(e for e in report.reconciled if e.edge_id == "marker:test:cross-section")
+    assert out == medium
+    assert report.unconfirmed == 0

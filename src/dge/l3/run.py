@@ -39,9 +39,16 @@ outcomes, and the third is the one CLAUDE.md invariant 5 dictates:
                         against, not proof against, so the edge is degraded to a
                         labeled low-confidence state and filtered at traversal
                         time — never deleted at ingest.
-  - never examined   -> untouched. The gate skipped that section, so no model
-                        ever formed an opinion, and pretending otherwise would
-                        make the graph depend on the cost gate's mood.
+  - never examined   -> untouched. No model was ever in a position to form an
+                        opinion, and pretending otherwise would make the graph
+                        depend on the cost gate's mood. Three ways this
+                        happens, and all three are the same case: the gate
+                        skipped the section; the call failed; or the edge's
+                        two endpoints never appeared in one window together,
+                        which is the normal state of a `defines` link from a
+                        provision to the definitions section. Only a question
+                        the model could actually have answered counts as
+                        having been asked.
 
 STRONG pattern edges pass through completely untouched: a drafting convention
 is better evidence than a model's opinion about a drafting convention.
@@ -170,7 +177,7 @@ def validate_candidate(
 def _reconcile_pattern_edges(
     pattern_edges: Sequence[Edge],
     proposed: Mapping[tuple[str, str, str], float],
-    examined_nodes: set[str],
+    examined_windows: Sequence[frozenset[str]],
     model_id: str,
     prompt_hash: str,
 ) -> tuple[list[Edge], int, int]:
@@ -181,7 +188,22 @@ def _reconcile_pattern_edges(
             edge.provenance is Provenance.PATTERN
             and edge.confidence < STRONG_PATTERN_CONFIDENCE
         )
-        if not medium or edge.src not in examined_nodes:
+        # BOTH endpoints, TOGETHER in one examined window — not merely `src`
+        # somewhere in the pass. L3 shows the model one section per call and
+        # `validate_candidate` discards any endpoint outside that window, so
+        # for a pattern edge whose target sits in another section there is no
+        # answer the model could have given that would count as confirmation.
+        # Degrading it is inferring a denial from a question never asked.
+        #
+        # Measured on Child_Labour_(Prohibition_and_Regulation)_Act,_1986:
+        # 17 of 21 degraded edges were cross-section `defines` links from a
+        # provision to the Sec. 2 definition of a term it uses — the most
+        # valuable edges in the graph and the ones a statute has most of —
+        # all pushed to 0.4, below the 0.5 traversal floor, by a model that
+        # was never shown the definitions section.
+        if not medium or not any(
+            edge.src in window and edge.dst in window for window in examined_windows
+        ):
             out.append(edge)
             continue
         model_confidence = proposed.get((edge.src, edge.dst, edge.type.value))
@@ -239,11 +261,10 @@ def run_l3(
     rejected: list[RejectedCandidate] = []
     failures: list[str] = []
     proposed: dict[tuple[str, str, str], float] = {}
-    examined_nodes: set[str] = set()
+    examined_windows: list[frozenset[str]] = []
     calls = candidates_seen = 0
 
     for section in admitted:
-        examined_nodes.update(n.node_id for n in section.nodes)
         label = section.path or section.title()
         try:
             candidates = extractor.extract(
@@ -257,6 +278,17 @@ def run_l3(
             failures.append(f"{section.key}: extractor failed: {type(exc).__name__}: {exc}")
             continue
         calls += 1
+        # AFTER the call succeeded, never before. A section whose call raised
+        # is in exactly the position of a section the gate skipped: no model
+        # formed an opinion about it. Marking it examined up front made a
+        # transient 429 silently halve the confidence of every MEDIUM pattern
+        # edge in it — measured on the first real corpus run, where
+        # Foreign_Marriage_Act,_1969 completed 0 calls and still had 28
+        # pattern edges pushed below the 0.5 traversal floor. That is the
+        # "cost gate's mood" failure this module's docstring rules out, and
+        # it also breaks CLAUDE.md invariant 8: the graph must be a function
+        # of the corpus, not of the network's weather.
+        examined_windows.append(frozenset(n.node_id for n in section.nodes))
 
         for candidate in candidates:
             candidates_seen += 1
@@ -274,7 +306,7 @@ def run_l3(
             edges.append(edge)
 
     reconciled, verified, unconfirmed = _reconcile_pattern_edges(
-        pattern_edges, proposed, examined_nodes,
+        pattern_edges, proposed, examined_windows,
         extractor.model_id, extractor.prompt_hash,
     )
 
