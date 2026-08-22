@@ -635,22 +635,55 @@ Two defects this exposed, both left alone deliberately:
   A parser misclassification; the footnote heuristic is load-bearing for
   `test_footnote_node_is_never_a_closure_edge_target` and was not touched.
 
+**Sub-section citations resolved (2026-08-22).** Measured before any code
+changed: ~40% of intra-document citations in the corpus name a sub-section
+("sub-section (1)"), which `LEGAL_SECTION_REF` cannot match at all — the
+enumerator sits in parentheses, not as a bare digit. A second registry,
+keyed `(enclosing section, enumerator)` and never on the enumerator alone
+(the same fabrication risk as the section-level fix above, at ~100x the
+scale), resolves them via the real `PART_OF` nesting. Also closed: a range
+form ("sub-sections (2) to (4)") that was silently dropping its middle
+member.
+
+    marker edges from a citing node mentioning a sub-section, 62 acts   108
+      hand-checked by shape, all correct given documented exclusions
+    self-referential exception linkage        89% -> 90%  (462 -> 471 / 521)
+    duplicate (src, dst, type) rows            0
+    Phase 0 density gate                       unchanged: p95=3, 9.8%
+    Phase 3 exit report labeled arms           UNCHANGED — A 10/15 B 11/15 C 12/15
+
+**The labeled-failure arms did not move.** None of the 15 cases specifically
+turns on a sub-section citation, so this closes a real, measured gap without
+moving Phase 3's headline number. Full detail, including the one deliberately
+undecided design question (a coarse section-level edge co-occurring with the
+new precise sub-section edge when a citation reads "sub-section (1) of
+section 9"), is in `decisions.md`.
+
+A genuine parser interaction surfaced while measuring, confirmed non-
+hypothetical on the eval bundle (3 real duplicate-enumerator warnings on
+`Comptroller_and_Auditor-Generals_...Act,_1971`): bracketed amendment
+headings can land as `PROPOSITION` rather than `STRUCTURAL` in at least one
+document, which would collapse several real sections onto one ancestor. The
+new registry's first-writer-wins-and-warn policy degrades this safely.
+Documented, not silently patched — it is `dge.parsing`'s concern.
+
 **What is still blocking, in order:**
 
-1. **Sub-section citations do not resolve.** The cross-SECTION half of this is
-   fixed and measured above; the sub-section half is untouched and is now the
-   larger population by far. See `NEXT_STEPS.md`.
-2. **`supersedes` is still unmeasured** — 1 model edge in 147 calls.
-3. **Seeding was lexical, not hybrid + rerank.** `BAAI/bge-large-en-v1.5` is
+1. **`supersedes` is still unmeasured** — 1 model edge in 147 calls.
+2. **Seeding was lexical, not hybrid + rerank.** `BAAI/bge-large-en-v1.5` is
    NOT cached on this machine (README claimed otherwise; the 4.8G in
    `~/.cache/huggingface` is `microsoft/phi-4`), and three download attempts
    died on the documented network stall. A weaker baseline can only flatter
    traversal, so the negative conclusion is robust to it — the absolute recall
    numbers will move.
-4. **The labeled failure set is 15/50** (Phase 0, still open). All 15 are
-   measured; the margin question deserves more than 15 cases.
-5. **The eval harness still does not write `eval_traces`.** The three-way split
+3. **The labeled failure set is 15/50** (Phase 0, still open). All 15 are
+   measured; the margin question deserves more than 15 cases, and now also
+   the question of why a 9-point corpus-wide linkage improvement has no case
+   in the set that can register it.
+4. **The eval harness still does not write `eval_traces`.** The three-way split
    is computed in `scripts/phase3_exit_report.py` and printed, not persisted.
+5. **`Aligarh_Muslim_University_Act,_1920`'s bracketed-heading misclassification**
+   (above) is a candidate `dge.parsing` fix, out of scope for this task.
 
 **Provider notes, both of which cost a run:**
 

@@ -128,6 +128,18 @@ class DomainPack:
     # confident wrong CLOSURE edge, and closure edges are unbudgeted.
     section_ref_pattern: Pattern[str] | None = None
     foreign_ref_pattern: Pattern[str] | None = None
+    # Sub-section citations ("sub-section (1)", "sub-sections (1) and (2)",
+    # "sub-section (1) of section 12") are a DIFFERENT population from
+    # `section_ref_pattern` and unresolvable by it: the parenthesised
+    # enumerator has no bare digit for `section_ref_pattern` to match, and
+    # even if it did, `_build_cursor`'s `section_registry` has no entry for a
+    # sub-section — only for headings. Group 1 is the enumerator list (same
+    # multi-value convention as `section_ref_pattern`); group 2, if present,
+    # is the enclosing section's number when the citation crosses sections
+    # ("... of section 12") rather than staying local to the citing node's own
+    # section. A pack that leaves this unset resolves no sub-section
+    # citations — same silence-over-guess default as above.
+    subsection_ref_pattern: Pattern[str] | None = None
     # Punctuation that ends the clause a marker is in. Anything after it
     # belongs to a different clause and is not what the marker governs.
     clause_break_pattern: Pattern[str] | None = None
@@ -484,6 +496,44 @@ LEGAL_FOREIGN_REF: Pattern[str] = re.compile(
 )
 
 
+# ---------------------------------------------------------------------------
+# Sub-section references — a population `LEGAL_SECTION_REF` cannot see
+#
+# `LEGAL_SECTION_REF` matches "section" (or "sec"/"ss") followed by a BARE
+# number. "sub-section (1)" has no bare number for it to find — the digit is
+# inside parentheses — so the citation is not mis-resolved, it is never
+# recognised at all. Measured over the 62-act corpus: 1111 bare sub-section
+# citations, 310 in "sub-section (N) of section M" form, 47 as an explicit
+# list ("sub-sections (1) and (2)"), plus 2 of the "sub- section" (hyphen,
+# space) variant India Code's text actually contains. All four shapes are
+# below in `tests/test_edges.py`.
+#
+# Group 1 is the raw parenthesised list, split into enumerators by
+# `_SUBSECTION_LIST_ENUM_RE` in `dge.edges` rather than here, so the pack
+# stays declarative and the splitting logic lives with the resolver that
+# consumes it. Group 2, when present, is the citation's OWN enclosing
+# section — "of section 12" — which changes where the enumerator is looked
+# up: within the citing node's own section by default, or within the named
+# section when this group matches. Getting that scope wrong is not a smaller
+# version of the fabrication bug fixed above — it is the SAME bug: "(1)" is
+# repeated in nearly every section of every Act, so resolving it without the
+# correct section as scope links a citation to an arbitrary, unrelated
+# provision.
+# The separator alternation accepts "to" as well as ",", "and", "or", "&" —
+# "sub-sections (2) to (4)" is a RANGE, not a two-item list, and appears 6
+# times in the 62-act corpus. `dge.edges._expand_subsection_enumerators`
+# does the actual range expansion (2 -> 2,3,4); this pattern only has to
+# admit "to" as a valid continuation so group 1 does not stop at "(2)" and
+# silently drop "(4)" the way the section-level resolver's list splitter
+# would if "to" were absent from its separator set.
+LEGAL_SUBSECTION_REF: Pattern[str] = re.compile(
+    r"\bsub-?\s*sections?\s*"
+    r"((?:\(\s*\d{1,3}[A-Za-z]?\s*\)\s*(?:,\s*|(?:,\s*)?(?:and|or|&|to)\s*)?)+)"
+    r"(?:\s*of\s+section\s*\.?\s*(\d{1,4}[A-Z]{0,2}))?",
+    I,
+)
+
+
 # Between an `after`-side marker and the citation it governs there may be a
 # path expression ("the first proviso to", "clause (e) of sub-section (3) of")
 # but never a new clause. This is the whole discriminator, and it fell out of
@@ -582,6 +632,7 @@ LEGAL_PACK = DomainPack(
     citation_patterns=LEGAL_CITATIONS,
     section_ref_pattern=LEGAL_SECTION_REF,
     foreign_ref_pattern=LEGAL_FOREIGN_REF,
+    subsection_ref_pattern=LEGAL_SUBSECTION_REF,
     clause_break_pattern=LEGAL_CLAUSE_BREAK,
     gate_terms=LEGAL_GATE_TERMS,
     override_scopes=LEGAL_OVERRIDE_SCOPES,

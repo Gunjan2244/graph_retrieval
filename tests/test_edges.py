@@ -260,3 +260,196 @@ def test_amendment_surgery_reads_the_citation_that_precedes_it():
     amends = [e for e in edges if e.type is EdgeType.AMENDS]
     assert len(amends) == 1
     assert amends[0].dst == section2.node_id
+
+
+# ---------------------------------------------------------------------------
+# Sub-section citation resolution ("sub-section (1)", "sub-sections (1) and
+# (2)", "sub-section (1) of section 9").
+#
+# `LEGAL_SECTION_REF` cannot see these at all — the enumerator sits inside
+# parentheses, not as a bare digit after the word "section" — and even if it
+# matched, `section_registry` has no entry for a sub-section, only for
+# headings. Measured on the 62-act corpus: 1111 bare citations, 310 in
+# "sub-section (N) of section M" form, 47 as an explicit list, 2 of the
+# hyphen-space variant India Code's text actually contains — roughly 40% of
+# intra-document citations in the corpus, silently dropped before this.
+#
+# `subsection_registry` is keyed on (enclosing section, enumerator), never the
+# enumerator alone: "(1)" recurs in nearly every section, so an unscoped
+# registry would map every sub-section (1) in a document onto whichever one
+# was written first — the same shape of fabrication `LEGAL_FOREIGN_REF` exists
+# to prevent for section citations, reproduced at corpus scale instead of one
+# marker type. `test_the_same_enumerator_in_another_section_is_never_the_target`
+# is the one pinning that property; it is the most important test in this
+# block.
+# ---------------------------------------------------------------------------
+
+
+def _parse_with_edges(raw: bytes):
+    result = PlainTextParser().parse(raw)
+    return finalize_doc_id("d", list(result.nodes), list(result.structural_edges))
+
+
+def test_a_subsection_citation_resolves_within_its_own_section():
+    raw = (
+        b"Section 12. Rule.\n\n(1) Everyone must comply.\n\n"
+        b"(2) Subject to the provisions of sub-section (1), a tenant may sublet."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    rule1 = next(n for n in nodes if "Everyone must comply" in n.raw)
+    citing = next(n for n in nodes if "Subject to the provisions" in n.raw)
+    edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    conditioned = [e for e in edges if e.type is EdgeType.CONDITIONED_ON]
+    assert len(conditioned) == 1
+    assert conditioned[0].src == citing.node_id
+    assert conditioned[0].dst == rule1.node_id
+
+
+def test_the_same_enumerator_in_another_section_is_never_the_target():
+    # Two sections, each with its own "(1)". A registry keyed on the bare
+    # enumerator would resolve the citation to whichever "(1)" it saw first —
+    # section 9's, not section 12's, and the citing node is in section 12.
+    raw = (
+        b"Section 9. Other.\n\n(1) Something else entirely.\n\n"
+        b"Section 12. Rule.\n\n(1) Everyone must comply.\n\n"
+        b"(2) Subject to the provisions of sub-section (1), a tenant may sublet."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    other_rule1 = next(n for n in nodes if "Something else entirely" in n.raw)
+    local_rule1 = next(n for n in nodes if "Everyone must comply" in n.raw)
+    edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    conditioned = [e for e in edges if e.type is EdgeType.CONDITIONED_ON]
+    assert len(conditioned) == 1
+    assert conditioned[0].dst == local_rule1.node_id
+    assert conditioned[0].dst != other_rule1.node_id
+
+
+def test_a_subsection_citation_qualified_by_another_section_resolves_there():
+    # "sub-section (1) of section 9" scopes to section 9, not the citing
+    # node's own section. Note: the bare substring "section 9" inside this
+    # phrase is ALSO matched by `LEGAL_SECTION_REF` independently (pre-existing
+    # behaviour, unrelated to this change) and produces its own edge to
+    # section 9's heading — coarser and redundant, but not fabricated: section
+    # 9 genuinely is named. Both edges are asserted here rather than silently
+    # narrowed to one; see decisions.md for why this is left as a documented
+    # finding rather than patched without corpus evidence.
+    raw = (
+        b"Section 9. Base.\n\n(1) Base rule text.\n\n"
+        b"Section 12. Override.\n\n"
+        b"(1) Notwithstanding anything contained in sub-section (1) of section 9, "
+        b"this rule governs."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    section9 = nodes[0]
+    subsection1 = next(n for n in nodes if "Base rule text" in n.raw)
+    edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    supersedes = [e for e in edges if e.type is EdgeType.SUPERSEDES]
+    dsts = {e.dst for e in supersedes}
+    assert subsection1.node_id in dsts
+    assert section9.node_id in dsts
+
+
+def test_a_subsection_of_a_foreign_act_resolves_to_nothing():
+    raw = (
+        b"Section 12. Rule.\n\n(1) Everyone must comply.\n\n"
+        b"(2) Subject to the provisions of sub-section (1) of section 12 of the "
+        b"Companies Act, no obligation arises."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    edges, warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    assert [e for e in edges if e.type is EdgeType.CONDITIONED_ON] == []
+    assert any("subject_to" in w for w in warnings)
+
+
+def test_a_subsection_citation_naming_several_writes_an_edge_to_each():
+    raw = (
+        b"Section 12. Rule.\n\n(1) First rule.\n\n(2) Second rule.\n\n"
+        b"(3) Subject to the provisions of sub-sections (1) and (2), a tenant "
+        b"may sublet."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    targets = {
+        next(n for n in nodes if "First rule" in n.raw).node_id,
+        next(n for n in nodes if "Second rule" in n.raw).node_id,
+    }
+    edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    conditioned = [e for e in edges if e.type is EdgeType.CONDITIONED_ON]
+    assert len(conditioned) == 2
+    assert {e.dst for e in conditioned} == targets
+
+
+def test_a_subsection_citation_in_a_later_clause_is_not_borrowed():
+    # The non obstante clause's own scope is "this Act", which names no
+    # section. "sub-section (1) of section 30" sits in a later clause, past a
+    # comma — the same clause-break rule that governs section citations must
+    # also stop the sub-section scan from borrowing it.
+    raw = (
+        b"Section 30. Confirmation.\n\n(1) Every record must be confirmed.\n\n"
+        b"Section 40. Quashing.\n\n"
+        b"(1) Notwithstanding anything contained in this Act, the record of every "
+        b"case so quashed shall be submitted for confirmation under sub-section "
+        b"(1) of section 30."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    assert [e for e in edges if e.type is EdgeType.SUPERSEDES] == []
+
+
+def test_a_node_with_no_structural_ancestor_resolves_to_nothing():
+    # No "Section N." heading anywhere in the document, so the citing node has
+    # no structural parent to walk to. Degrades to silence (CLAUDE.md
+    # invariant 9), not to a guessed scope.
+    raw = b"Subject to the provisions of sub-section (1), commencement shall follow."
+    nodes, struct_edges = _parse_with_edges(raw)
+    edges, warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    assert [e for e in edges if e.type is EdgeType.CONDITIONED_ON] == []
+    assert any("subject_to" in w for w in warnings)
+
+
+def test_the_hyphen_space_form_resolves():
+    # India Code's text really does contain "sub- section (N)" — hyphen,
+    # then a space, before "section". Same corpus discipline as the
+    # "Secs . 7" abbreviated form pinned above.
+    raw = (
+        b"Section 12. Rule.\n\n(1) Everyone must comply.\n\n"
+        b"(2) Subject to the provisions of sub- section (1), a tenant may sublet."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    rule1 = next(n for n in nodes if "Everyone must comply" in n.raw)
+    edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    conditioned = [e for e in edges if e.type is EdgeType.CONDITIONED_ON]
+    assert len(conditioned) == 1
+    assert conditioned[0].dst == rule1.node_id
+
+def test_a_subsection_range_expands_the_middle_enumerators():
+    # "sub-sections (2) to (4)" names three provisions, not two. A resolver
+    # that only captured the range's endpoints would silently drop (3).
+    raw = (
+        b"Section 12. Rule.\n\n(1) First.\n\n(2) Second.\n\n(3) Third.\n\n(4) Fourth.\n\n"
+        b"(5) Subject to the provisions of sub-sections (2) to (4), a tenant may sublet."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    targets = {
+        next(n for n in nodes if n.raw.startswith("(2)")).node_id,
+        next(n for n in nodes if n.raw.startswith("(3)")).node_id,
+        next(n for n in nodes if n.raw.startswith("(4)")).node_id,
+    }
+    edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    conditioned = [e for e in edges if e.type is EdgeType.CONDITIONED_ON]
+    assert len(conditioned) == 3
+    assert {e.dst for e in conditioned} == targets
+
+
+def test_a_lettered_subsection_range_does_not_guess_the_middle():
+    # "(2A) to (4)" has no defined successor for "2A" — expand only the two
+    # named endpoints, never a guessed middle.
+    raw = (
+        b"Section 12. Rule.\n\n(2A) Second-A.\n\n(3) Third.\n\n(4) Fourth.\n\n"
+        b"(5) Subject to the provisions of sub-sections (2A) to (4), a tenant may sublet."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    two_a = next(n for n in nodes if n.raw.startswith("(2A)"))
+    four = next(n for n in nodes if n.raw.startswith("(4)"))
+    edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    conditioned = [e for e in edges if e.type is EdgeType.CONDITIONED_ON]
+    assert {e.dst for e in conditioned} == {two_a.node_id, four.node_id}

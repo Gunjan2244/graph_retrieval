@@ -233,3 +233,107 @@ held at 0/170 with the flat-RAG falsification at 77.1% unsound.
 
 **Still not met.** One case is not "a clear margin" over the baseline, and the
 labeled set is 15 cases. This narrows the gap; it does not close the exit.
+
+## 2026-08-22 — Sub-section citations: ~40% of intra-document references were invisible
+
+**Decision: recognize and resolve them via a second, section-scoped registry —
+never fold them into `section_registry`.**
+
+Measured before any code changed: `LEGAL_SECTION_REF` matches "section"
+followed by a bare digit, so "sub-section (1)" — the digit sits inside
+parentheses — never matched at all. Not mis-resolved; unseen. Across 25 of
+the 62 corpus acts: 1323 sub-section nodes exist, 910 citations to a
+*section* resolve today, 617 citations to a *sub-section* resolved to
+nothing. Extrapolated corpus-wide, roughly 1500 citations — the largest
+single unresolved population found so far, larger than every gap fixed in
+the previous round combined.
+
+**The registry key is `(enclosing section, enumerator)`, never the
+enumerator alone.** "(1)" recurs in nearly every section of every Act; an
+unscoped registry would map all 1323 sub-section nodes onto whichever "(1)"
+was written first — the same shape of fabrication `LEGAL_FOREIGN_REF` exists
+to prevent for section citations, at roughly 100x the scale and entirely
+inside closure edges that traversal follows unbudgeted. The enclosing section
+is found by walking the real `PART_OF` nesting `dge.parsing` already builds,
+via a new `_enclosing_section` helper — not re-derived from document order.
+
+**A genuine parser interaction surfaced while measuring, not invented to
+justify the design.** Probing duplicate enumerators found bracketed amendment
+headings (`10[17. The Chancellor.`) landing as `NodeKind.PROPOSITION` rather
+than `STRUCTURAL` in at least one document (`Aligarh_Muslim_University_Act,
+_1920`), which would collapse several real sections onto one ancestor. The
+registry's first-writer-wins-and-warn policy degrades this safely — confirmed
+non-hypothetical when ingesting the 9-document eval bundle produced three real
+duplicate-enumerator warnings on `Comptroller_and_Auditor-Generals_...Act,
+_1971`. Left as a documented risk, not silently patched — the footnote/heading
+classification is `dge.parsing`'s concern, out of this task's scope, and
+"fixing" it without corpus evidence risks the same kind of error this whole
+exercise was trying to prevent.
+
+**A second, smaller gap found by hand-checking the edges this produced, not by
+guessing in advance.** "sub-sections (2) to (4)" is a range — three
+provisions — and the original separator set (`,` / `and` / `or` / `&`) has no
+concept of "to", so only "(2)" was captured and "(3)", "(4)" silently
+dropped. 6 occurrences across the corpus, all bare digits. Added "to" to the
+pattern's separator alternation and a dedicated `_expand_subsection_enumerators`
+step that expands the numeric range — but only when both endpoints are bare
+digits. A lettered endpoint ("(2A) to (4)") has no defined successor, so only
+the two named endpoints are kept; the middle is never guessed. Same
+invariant-9 discipline as everywhere else in this file: degrade to a smaller,
+correct set rather than a larger, guessed one.
+
+**Measured effect, corpus-wide (62 acts):**
+
+```
+marker edges from a citing node mentioning a sub-section     108
+  bare "sub-section (N)"                                      62
+  list "sub-sections (N) and (M)"                              33
+  "sub-section (N) of section M"                               13
+duplicate (src, dst, type) rows                                 0
+```
+
+Hand-checked by shape rather than sampled in aggregate (docs/06 §6.3
+discipline): all 108 correct given the documented range-expansion and
+foreign-citation exclusions. One coarse-plus-precise redundancy was found and
+kept deliberately rather than patched: "sub-section (1) of section 9" produces
+BOTH a precise edge to the sub-section (this fix) and, independently, a
+coarser edge to section 9's heading — because the substring "section 9" is
+*also* matched by the pre-existing, untouched `LEGAL_SECTION_REF` scan over
+the same window. Not a fabrication (section 9 genuinely is named), but an
+over-broad companion edge; flagged in `test_a_subsection_citation_qualified_
+by_another_section_resolves_there`'s docstring rather than silently
+suppressed, since narrowing it needs corpus evidence this task did not
+collect.
+
+**Falsifiability, measured, not assumed:** eight of ten new tests each fail
+when their specific mechanism is reverted, checked by reverting all eight in
+turn. `test_a_node_with_no_structural_ancestor_resolves_to_nothing` is the
+exception, disclosed rather than papered over: a mutation that makes a
+citing node fall back to its OWN id as scope did not fail the test, because
+`subsection_registry` structurally never contains a self-referential key on
+this fixture, so the lookup still returns nothing by construction rather than
+by the explicit `if scope is None` guard. The guard is still the correct,
+invariant-9-mandated code — this is a note about the strength of one test's
+pin, not about the correctness of the mechanism it pins.
+
+**Phase 0 density gate re-run, essentially unchanged:** chain p95 = 3,
+closure density 9.8% (was 9.7%) — expected, since this gate counts nodes
+carrying a closure *marker*, not resolved edges, and this change alters
+resolution, not marker presence.
+
+**Phase 3 exit report re-run: the labeled-failure arms did NOT move** —
+`A 10/15  B 11/15  C 12/15`, identical to the state at the start of this
+task. None of the 15 labeled cases specifically turns on a sub-section
+citation. What did move, corpus-wide: self-referential exception linkage
+89% -> 90% (462 -> 471 of 521 exception-shaped nodes now carry an outgoing
+closure edge, +9 provisions that previously had none at all). Soundness held
+at 0/170; flat-RAG falsification 78.2% unsound (was 77.1%). Ingest confirmed
+idempotent (2995 edges, identical on re-run) with zero duplicate
+`(src, dst, type)` rows.
+
+**Net:** a real, load-bearing gap (~40% of a citation population) is closed
+with measured precision and falsifiable tests, but it does not move Phase 3's
+headline exit number on this labeled set. The next lever for that number
+remains what `NEXT_STEPS.md` already names — the `Foreign_Marriage_Act,_1969`
+footnote misclassification and, more broadly, growing the labeled set past 15
+so a 9-point linkage improvement has cases that can register it.
