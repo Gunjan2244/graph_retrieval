@@ -332,8 +332,65 @@ LEGAL_MARKERS: tuple[MarkerPattern, ...] = (
         re.compile(r"for\s+the\s+purposes?\s+of\s+this\s+"
                    r"(?:section|Act|Chapter|clause|sub-section)", I),
         EdgeType.DEFINES, Confidence.MEDIUM, "following",
-        note="Scoped definition. The scope is the named unit, NOT the whole Act — "
-             "this is the shadowing case the symbol table exists for.",
+        note="Scoped definition, SELF-referential variant. The scope is the named "
+             "unit, NOT the whole Act — this is the shadowing case the symbol "
+             "table exists for. Disjoint from "
+             "`for_the_purposes_of_referenced` below by the literal 'this'.",
+    ),
+    MarkerPattern(
+        "for_the_purposes_of_referenced",
+        # Same drafting formula, CITED variant: "For the purposes of clause (ii)
+        # of sub-section (1), the expenditure ... shall mean X" scopes a
+        # definition to a provision it NAMES, where the marker above scopes to
+        # the one it sits in. The two need different targets, so they are two
+        # markers rather than one with a guessed hint — the same split
+        # `ref_side` already makes for non obstante vs amendment surgery.
+        #
+        # Measured over the 62-act corpus: 23 sites where a citation is the
+        # direct object of "for the purposes of", against 119 self-referential
+        # "this <unit>" sites. The old marker matched neither of the 23 (it
+        # requires the literal "this"), so `target_hint="following"` was never
+        # wrong on them — they were simply invisible, the same shape of gap as
+        # sub-section citations.
+        #
+        # The lookahead is what keeps this disjoint from ordinary prose:
+        # "for the purposes of enrolment" (169 such sites) must not fire. The
+        # match itself deliberately stops BEFORE the citation, so `ref_side`
+        # stays "after" and `foreign_ref_pattern` can still see the trailing
+        # "of the Indian Penal Code" — several of the 23 cite other
+        # instruments, and a "within" match would hide that from the guard and
+        # fabricate a local target.
+        re.compile(
+            r"for\s+the\s+purposes?\s+of\s+"
+            # Lookahead only — nothing after "of " is consumed, so `ref_side`
+            # stays "after", the citation scan starts at the citation, and
+            # `foreign_ref_pattern` can still see a trailing "of the Indian
+            # Penal Code". A consuming match would hide that and fabricate a
+            # local target.
+            r"(?=(?:(?:clause|item|paragraph|sub-?\s*clause)\s*\([^)]{1,6}\)\s*of\s+)?"
+            r"(?:sub-?\s*sections?\s*(?:\(\s*\d{1,3}[A-Za-z]?\s*\)\s*"
+            r"(?:,\s*|(?:,\s*)?(?:and|or|&|to)\s*)?)+"
+            r"|sections?\s*\.?\s*\d{1,4}[A-Z]{0,2}"
+            r"(?:\s*(?:,|and|&|or)\s*\d{1,4}[A-Z]{0,2})*)"
+            r"(?:\s*and\s+this\s+\w+)?"
+            # The clause boundary is the whole discriminator — see the note.
+            r"\s*[,\u2013\u2014-])", I),
+        EdgeType.DEFINES, Confidence.STRONG, "referenced", "after",
+        note="Scopes a definition to the provision it CITES. Orientation is "
+             "`EdgeType.DEFINES`'s: the cited provision is `src` (the usage) "
+             "and this node is `dst` (the meaning), so traversal walks FORWARD "
+             "from a provision to the definition that governs it. "
+             "The trailing clause boundary in the lookahead is load-bearing, "
+             "not defensive padding: 'for the purposes of X' scopes a "
+             "definition only when the citation prefaces a rule "
+             "('for the purposes of sub-section (2), it shall be presumed'), "
+             "and is merely referential when it runs on into a verb or noun "
+             "phrase ('any authority prescribed for the purposes of "
+             "sub-section (1) may'). Hand-labelling the corpus population "
+             "separated 10/10 scoping uses from 4/4 referential ones on that "
+             "rule alone. It is a claim about English syntax that can be "
+             "stated and tested, not a constant fitted to a sample — the same "
+             "discipline as `clause_break_pattern`.",
     ),
     # ---- amendment surgery ----
     MarkerPattern(

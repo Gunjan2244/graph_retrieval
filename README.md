@@ -28,7 +28,7 @@ passage is **about**; typed edges record how passages **govern each other**.
 
 ## Status: 15 of 40 tasks done
 
-151 tests pass; `mypy --strict` and `ruff` are clean.
+155 tests pass; `mypy --strict` and `ruff` are clean.
 
 | Phase | State |
 |---|---|

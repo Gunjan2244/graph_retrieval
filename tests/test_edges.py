@@ -453,3 +453,86 @@ def test_a_lettered_subsection_range_does_not_guess_the_middle():
     edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
     conditioned = [e for e in edges if e.type is EdgeType.CONDITIONED_ON]
     assert {e.dst for e in conditioned} == {two_a.node_id, four.node_id}
+
+# ---------------------------------------------------------------------------
+# "For the purposes of X" — the CITED variant.
+#
+# Same drafting formula as `for_the_purposes_of`, opposite target: that marker
+# scopes to the unit it SITS IN ("this section"), this one to the unit it
+# NAMES. Measured over 62 acts: 23 cited sites against 119 self-referential
+# ones; the old marker matched none of the 23, so they were invisible rather
+# than mis-targeted.
+# ---------------------------------------------------------------------------
+
+
+def test_a_cited_for_the_purposes_of_scopes_to_the_named_provision():
+    raw = (
+        b"Section 4. Costs.\n\n"
+        b"(1) The Board shall meet the expenditure specified in the Schedule.\n\n"
+        b"(2) For the purposes of sub-section (1), the expenditure on the dam "
+        b"shall mean the capital cost only."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    usage = next(n for n in nodes if n.raw.startswith("(1)"))
+    definition = next(n for n in nodes if n.raw.startswith("(2)"))
+    edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    defines = [e for e in edges if e.type is EdgeType.DEFINES]
+    # DEFINES traverses FORWARD (usage -> meaning), so the cited provision is
+    # `src` and the definition is `dst`: seeding on (1) reaches (2).
+    assert any(e.src == usage.node_id and e.dst == definition.node_id for e in defines)
+
+
+def test_a_referential_for_the_purposes_of_is_not_a_definition():
+    # "any authority prescribed for the purposes of sub-section (1) may ..."
+    # names a provision but does not define anything for it — the citation
+    # runs on into a verb phrase instead of prefacing a rule.
+    raw = (
+        b"Section 4. Authorities.\n\n"
+        b"(1) The prescribed authority shall keep a register.\n\n"
+        b"(2) Any authority prescribed for the purposes of sub-section (1) may "
+        b"require the production of documents."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    usage = next(n for n in nodes if n.raw.startswith("(1)"))
+    referential = next(n for n in nodes if n.raw.startswith("(2)"))
+    edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    assert not [
+        e for e in edges
+        if e.type is EdgeType.DEFINES
+        and e.src == usage.node_id
+        and e.dst == referential.node_id
+    ]
+
+
+def test_a_cited_for_the_purposes_of_naming_a_foreign_act_resolves_to_nothing():
+    raw = (
+        b"Section 196. Local.\n\n(1) Something local.\n\n"
+        b"Section 20. Proceedings.\n\n"
+        b"(1) Every proceeding shall be deemed judicial for the purposes of "
+        b"section 196 of the Indian Penal Code, and the Tribunal shall be a court."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    local196 = nodes[0]
+    edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    assert not [
+        e for e in edges
+        if e.type is EdgeType.DEFINES and local196.node_id in (e.src, e.dst)
+    ]
+
+def test_a_multi_target_defines_citation_produces_distinct_edge_ids():
+    # Regression: `MARKER_ORIENTATION` inverts DEFINES, so `dst` is the citing
+    # node, not the target. Keying `edge_id` on `dst` gave every target from
+    # one node the same id and raised UNIQUE constraint failed at bundle write.
+    raw = (
+        b"Section 4. Duties.\n\n"
+        b"(1) An occupier shall give notice.\n\n"
+        b"(2) An occupier shall keep a register.\n\n"
+        b"(3) For the purposes of sub-sections (1) and (2), \"notice\" means "
+        b"written notice served by post."
+    )
+    nodes, struct_edges = _parse_with_edges(raw)
+    edges, _warnings = extract_marker_edges(nodes, PACK, struct_edges)
+    defines = [e for e in edges if e.type is EdgeType.DEFINES]
+    multi = [e for e in defines if "for_the_purposes_of_referenced" in e.edge_id]
+    assert len(multi) == 2
+    assert len({e.edge_id for e in multi}) == 2

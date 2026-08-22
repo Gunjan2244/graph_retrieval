@@ -495,7 +495,16 @@ def extract_marker_edges(
             for target in targets:
                 src, dst = _orient(node.node_id, target, marker.edge_type)
                 edges.append(Edge(
-                    edge_id=f"marker:{marker.name}:{node.node_id}:{dst}",
+                    # Keyed on the RESOLVED TARGET, not on `dst`. For most
+                    # edge types `dst` IS the target so this is identical, but
+                    # `MARKER_ORIENTATION` inverts DEFINES — there `dst` is the
+                    # citing node itself, so every target from one node
+                    # produced the same id and a multi-target DEFINES citation
+                    # ("for the purposes of sub-sections (1) and (2)") raised
+                    # UNIQUE constraint failed on `edges.edge_id` at bundle
+                    # write. Latent until a DEFINES marker first resolved
+                    # `referenced` with more than one target.
+                    edge_id=f"marker:{marker.name}:{node.node_id}:{target}",
                     src=src, dst=dst, type=marker.edge_type,
                     provenance=Provenance.PATTERN,
                     confidence=confidence,

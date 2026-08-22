@@ -337,3 +337,83 @@ headline exit number on this labeled set. The next lever for that number
 remains what `NEXT_STEPS.md` already names — the `Foreign_Marriage_Act,_1969`
 footnote misclassification and, more broadly, growing the labeled set past 15
 so a 9-point linkage improvement has cases that can register it.
+
+## 2026-08-22 — "For the purposes of X": one formula, two targets
+
+**Decision: split the marker rather than guess a hint, and gate the cited
+variant on a clause boundary.**
+
+`for_the_purposes_of` required the literal "this" ("for the purposes of this
+section") and targeted `following`. Measured over 62 acts: 119 such
+self-referential sites, and **23 sites where a citation is the direct object**
+("For the purposes of clause (ii) of sub-section (1), the expenditure ...").
+The old marker matched none of the 23 — so `following` was never *wrong* on
+them, they were simply invisible. Same shape as the sub-section gap: an
+unmatched population, not a mis-resolved one. Added
+`for_the_purposes_of_referenced` with `target_hint="referenced"`, disjoint
+from the original by the literal "this".
+
+**The precision problem, found by hand-checking every edge rather than
+sampling.** The first version wrote 21 edges, of which ~5 were wrong — all one
+shape: the phrase used *referentially* inside a noun phrase ("any tax
+authority **prescribed for the purposes of** sub-section (1) **may** require
+...") rather than as a scoping preface. Those name a provision but define
+nothing for it.
+
+**The discriminator is a clause boundary, and it was tested before it was
+adopted.** "For the purposes of X" scopes a definition when the citation
+prefaces a rule (comma or dash follows) and is merely referential when it runs
+on into a verb or noun phrase. Hand-labelling the population separated
+**10/10** scoping uses from **4/4** referential ones on that rule alone. This
+is a statable claim about English syntax, not a constant fitted to a sample —
+the same discipline as `clause_break_pattern`. Result: 21 edges -> **16, all
+16 hand-checked correct**, with no true positive lost.
+
+The lookahead deliberately consumes nothing after "of ", so `ref_side` stays
+`"after"` and `foreign_ref_pattern` still sees a trailing "of the Indian Penal
+Code" — several of the 23 cite other instruments, and a consuming ("within")
+match would have hidden that from the guard and fabricated a local target.
+
+**A latent `edge_id` bug this exposed, fixed at source.** Bundle write failed
+with `UNIQUE constraint failed: edges.edge_id`. Cause: `edge_id` was keyed on
+`dst`, but `MARKER_ORIENTATION` **inverts** DEFINES — there `dst` is the
+citing node itself, so every target resolved from one node produced an
+identical id. Latent until a DEFINES marker first resolved `referenced` with
+more than one target ("for the purposes of sub-sections (1) and (2)"). Now
+keyed on the resolved `target`; for every other edge type `dst` *is* the
+target, so no existing id changes. Pinned by
+`test_a_multi_target_defines_citation_produces_distinct_edge_ids`.
+
+**Measured effect.**
+
+```
+edges written (62 acts)                16, all hand-checked correct
+sites matched but resolving to nothing  4  (foreign-Act citations — correct)
+Phase 0 density gate                    PASS, p95=3, 9.9% (was 9.8%)
+idempotent                              yes, 3000 edges
+duplicate (src,dst,type)                0
+tests                                   155 pass
+```
+
+**The Betwa `lost_scope` case: the edge now exists, and the case still does
+not move.** The gold node (`(2) For the purposes of clause (ii) of sub-section
+(1), the expenditure on the Rajghat Dam ...`) had **zero inbound edges**
+before this change and now has exactly the right one — an inbound `defines`
+from sub-section (1), so a seed landing on (1) walks forward to the
+definition. The labeled arms are nevertheless unchanged at
+`A 10/15 B 11/15 C 12/15`.
+
+That is a **seeding** failure, not an extraction or traversal one, and it
+promotes standing blocker 3 from a caveat to the operative constraint:
+seeding is still lexical because `BAAI/bge-large-en-v1.5` is not cached and
+the documented network stall blocks the download. The traversal cannot start
+from sub-section (1) if lexical seeding never ranks it. The graph is now
+correct for this case and the retrieval front-end is what is short — a
+different component from the one every previous round pointed at.
+
+**Honest limit:** two rounds running, a real measured extraction gap has
+closed without moving the headline number. That is now three separate
+findings (sub-section citations, cited "for the purposes of", and this) all
+pointing at the same two places: the labeled set is 15 cases, and seeding is
+lexical. Neither is an extraction problem, and continuing to fix extraction
+is unlikely to move the exit criterion.

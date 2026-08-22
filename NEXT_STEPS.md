@@ -12,7 +12,7 @@ other docs.
 
 ## Where the project stands
 
-**15 of 40 tasks done.** 151 tests pass, `mypy --strict` and `ruff` clean.
+**15 of 40 tasks done.** 155 tests pass, `mypy --strict` and `ruff` clean.
 
 Of the 25 remaining, 10 are Phases 5–6 and explicitly post-MVP. **15 tasks
 stand between here and the MVP** defined in `docs/06` §6.4.
@@ -119,7 +119,37 @@ of the 15 cases turns on a sub-section citation. What moved: self-referential
 exception linkage 89% -> 90% corpus-wide. Phase 0 density gate re-confirmed
 unchanged (p95=3, 9.8%).
 
-## Immediate next step: grow the labeled failure set, or fix the AMU heading bug
+## Immediate next step: unblock SEEDING — the evidence now points there
+
+**Three consecutive rounds have closed a real, measured extraction gap without
+moving `A 10/15 B 11/15 C 12/15`.** Sub-section citations, then cited
+"for the purposes of", then the `edge_id` collision. The most recent is the
+clearest signal: the Betwa `lost_scope` gold node went from **zero inbound
+edges to exactly the right one**, and the case still reports `never`. The
+graph is correct for that case; retrieval never starts from the provision
+that would reach it.
+
+That is standing blocker 3, promoted from caveat to operative constraint:
+**seeding is still lexical.** `BAAI/bge-large-en-v1.5` is not cached and three
+download attempts died on the documented network stall. Until hybrid + rerank
+seeding runs, arm A is weak, and a weak arm A flatters traversal while hiding
+exactly the wins these rounds are producing.
+
+Do this before any further extraction work:
+
+1. Get `BAAI/bge-large-en-v1.5` cached (see README's fastembed section for the
+   three download gotchas). A different network, a manual HF download, or a
+   mirror all count — this is an environment problem, not a code one.
+2. Re-run `scripts/phase3_exit_report.py` on the SAME bundle with hybrid
+   seeding. Record all three arms. Absolute recall will move; the question is
+   whether arm C's margin over arm A grows.
+3. Only then decide whether the extractor still needs work.
+
+**Second, and independent: the labeled failure set is 15/50.** Three measured
+corpus-wide improvements now have no case positioned to register them. That is
+itself evidence the set is too small to answer the margin question.
+
+## Parked: the AMU heading bug
 
 **Model: Sonnet for either.** Two independent, small options — pick based on
 which you want more right now:
