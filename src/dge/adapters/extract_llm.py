@@ -47,7 +47,12 @@ from dge.l3.prompt import build_messages, prompt_hash, ref_labels
 from dge.l3.schema import ExtractionResponse, response_json_schema
 from dge.model import Node
 
-DEFAULT_MODEL = "groq/llama-3.3-70b-versatile"
+# Verified reachable on 2026-08-21 with native `json_schema` + `strict`, and a
+# 1000 requests/day free tier. The previous default,
+# `groq/llama-3.3-70b-versatile`, now 404s ("does not exist or you do not have
+# access to it") — the same staleness that retired `gemini-2.0-flash`. A model
+# id is data, so it is checked by asking the provider, never assumed.
+DEFAULT_MODEL = "groq/openai/gpt-oss-120b"
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
 
 

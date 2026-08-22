@@ -45,6 +45,18 @@ class MarkerPattern:
     # Where the OTHER endpoint usually lives relative to the matched node.
     # 'preceding' -> the governed node is the previous sibling/parent clause.
     target_hint: str = "preceding"
+    # For target_hint='referenced' only: which side of THIS marker the citation
+    # it governs sits on. Measured, not assumed — searching the whole node and
+    # taking the first hit gave the wrong target on 8 of 54 corpus sites, e.g.
+    # "...paid into court under section 98, such court shall, notwithstanding
+    # anything in this Act..." resolved the non obstante clause to s.98, which
+    # it does not mention. Non obstante / subject to / save as provided all end
+    # their match at the preposition, so the citation FOLLOWS. The amendment
+    # surgery markers are the inverse: "in section 1, ... shall be substituted"
+    # names its target BEFORE the operative phrase. 'within' is for markers
+    # whose match spans the citation, so that the evidence span is the claim
+    # itself rather than the two words that introduce it.
+    ref_side: str = "after"
     note: str = ""
 
 
@@ -101,6 +113,24 @@ class DomainPack:
     citation_patterns: Sequence[Pattern[str]]
     gate_terms: Sequence[str] = field(default_factory=tuple)
     override_scopes: Sequence[OverrideScopePattern] = field(default_factory=tuple)
+    # How a `referenced` marker's citation is read. Both are pack data because
+    # both are drafting conventions, not facts about graphs (invariant 11) —
+    # `dge.edges` previously hardcoded `section\s+(\d+)`, which is a sentence
+    # of English legal usage living in the engine.
+    #
+    # `section_ref_pattern` must expose the number list in group 1;
+    # `foreign_ref_pattern` is matched against the text IMMEDIATELY FOLLOWING
+    # that list, and a match means the citation belongs to another instrument
+    # and therefore has no target in this document.
+    #
+    # A pack that leaves these unset resolves no `referenced` markers at all,
+    # which is the correct default: silently guessing a target is how you get a
+    # confident wrong CLOSURE edge, and closure edges are unbudgeted.
+    section_ref_pattern: Pattern[str] | None = None
+    foreign_ref_pattern: Pattern[str] | None = None
+    # Punctuation that ends the clause a marker is in. Anything after it
+    # belongs to a different clause and is not what the marker governs.
+    clause_break_pattern: Pattern[str] | None = None
     notes: str = ""
 
     def should_run_l3(self, text: str) -> bool:
@@ -235,6 +265,33 @@ LEGAL_MARKERS: tuple[MarkerPattern, ...] = (
         EdgeType.EXCEPTION_OF, Confidence.STRONG, "referenced",
     ),
     MarkerPattern(
+        "nothing_in_referenced_shall_apply",
+        # The cross-reference carve-out — and the form the corpus measurement
+        # said was the leaky one. `nothing_shall_apply` below handles
+        # "nothing in THIS section", which points at itself and resolves
+        # structurally; this handles "nothing in section 28 shall apply",
+        # which points somewhere else and had no marker at all. Two of the
+        # labelled `lost_exception` cases turn on it, including Mines Act 1952
+        # s.37 and the Child Labour Act's family-establishment carve-out.
+        #
+        # The match deliberately SPANS the citation (`ref_side="within"`) and
+        # stops just before the verb, so `evidence_span` reads "Nothing in
+        # Secs . 7, 8 and 9" — the claim — instead of "Nothing in".
+        #
+        # The verb list is from the corpus, not from imagination: of the four
+        # sites where a citation follows, the verbs are apply (2), be (1) and
+        # authorise (1). `(?!\s+this\b)` keeps this disjoint from the marker
+        # below, so a node never gets both.
+        re.compile(
+            r"nothing\s+(?:contained\s+)?in\b(?!\s+this\b)[^;]{0,60}?"
+            r"(?=\s+shall\s+(?:apply|be|affect|extend|authoris|authoriz|render|"
+            r"entitle|prevent|operate)\w*\b)", I),
+        EdgeType.EXCEPTION_OF, Confidence.STRONG, "referenced", "within",
+        note="Disapplies the named provisions. Fires only where a citation is "
+             "actually present; 'nothing in the foregoing provisions' matches "
+             "but resolves to no target, which is the correct outcome.",
+    ),
+    MarkerPattern(
         "nothing_shall_apply",
         re.compile(r"nothing\s+(?:contained\s+)?in\s+this\s+"
                    r"(?:section|Act|Chapter|sub-section|rule)\s+shall\s+"
@@ -271,23 +328,23 @@ LEGAL_MARKERS: tuple[MarkerPattern, ...] = (
         "substitution",
         re.compile(r"for\s+the\s+(?:words|figures|expression|brackets)[^,]{0,120},\s*"
                    r"the\s+(?:words|figures|expression)[^,]{0,120}\s+shall\s+be\s+substituted", I),
-        EdgeType.AMENDS, Confidence.STRONG, "referenced",
+        EdgeType.AMENDS, Confidence.STRONG, "referenced", "before",
     ),
     MarkerPattern(
         "insertion",
         re.compile(r"shall\s+be\s+inserted\b", I),
-        EdgeType.AMENDS, Confidence.STRONG, "referenced",
+        EdgeType.AMENDS, Confidence.STRONG, "referenced", "before",
     ),
     MarkerPattern(
         "omission",
         re.compile(r"shall\s+be\s+omitted\b", I),
-        EdgeType.AMENDS, Confidence.STRONG, "referenced",
+        EdgeType.AMENDS, Confidence.STRONG, "referenced", "before",
     ),
     MarkerPattern(
         "repeal",
         re.compile(r"\b(?:is|are|shall\s+stand)\s+hereby\s+repealed\b|"
                    r"\bRepeal\s+and\s+[Ss]avings?\b", I),
-        EdgeType.SUPERSEDES, Confidence.STRONG, "referenced",
+        EdgeType.SUPERSEDES, Confidence.STRONG, "referenced", "before",
     ),
     # ---- case law treatment ----
     MarkerPattern(
@@ -376,6 +433,79 @@ LEGAL_DEFINITIONS: tuple[Pattern[str], ...] = (
 # Citations — deterministic cross-document edges, free of charge
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Reference resolution — how a `referenced` marker finds its target
+#
+# Both patterns are pack data, not engine code, because both encode English
+# legal drafting convention (invariant 11). `dge.edges` used to carry
+# `re.compile(r"section\s+(\d+[A-Za-z]*)")` and take the FIRST hit in the whole
+# node, which was wrong twice over on the real corpus: it missed every plural
+# form and it fabricated targets. Measured over 63 Central Acts, 14 of the 54
+# resolved sites were wrong (26%) — and every one of them was a CLOSURE-class
+# edge, the kind traversal follows unbudgeted and mandatorily.
+# ---------------------------------------------------------------------------
+
+# Group 1 is the NUMBER LIST, which may name several provisions at once:
+# "sections 57 and 58", "Secs . 7, 8 and 9", "section 21, section 22 or
+# section 23". The list form is not a curiosity — "Nothing in section 28,
+# section 30, section 31, section 34 ... shall apply to persons employed in a
+# supervising capacity" (Mines Act 1952 s.37) is verbatim one of the labelled
+# failure cases, and under a single-target resolver four of its five citations
+# were silently dropped.
+#
+# `\s*\.?\s*` after the lead-in is not defensive padding: India Code's text
+# really does contain "Secs . 7", with the space before the period.
+LEGAL_SECTION_REF: Pattern[str] = re.compile(
+    r"\b(?:sections?|secs?|ss)\s*\.?\s*"
+    r"(\d{1,4}[A-Z]{0,2}(?:\s*(?:,|and|&|or)\s*\d{1,4}[A-Z]{0,2})*)",
+    I,
+)
+
+# Matched against the text IMMEDIATELY AFTER the number list. A hit means the
+# citation names another instrument, so it has NO target in this document and
+# must resolve to nothing.
+#
+# This is the fabrication guard, and it is doing real work: "Notwithstanding
+# anything contained in section 12 of the Central Goods and Services Tax Act,
+# no tax shall be payable..." was resolving to *this* Act's section 12 — a
+# STRONG-confidence `supersedes` edge to a provision the sentence never
+# mentions. 6 of 54 sites.
+#
+# `[A-Z]` for the instrument's first word is what separates a foreign citation
+# from a local one: "of this Act" and "of that sub-section" stay lowercase and
+# are correctly left alone. `said|principal|repealed` are spelled out because
+# amendment acts refer to their target as "the said Act" in lower case, and
+# that Act is emphatically not this one.
+LEGAL_FOREIGN_REF: Pattern[str] = re.compile(
+    r"\A\s*of\s+(?:the\s+)?(?:said|principal|repealed|[A-Z][\w'\u2019-]*)"
+    r"(?:[\s,][\w'\u2019.,()\[\]-]+){0,10}?\s*"
+    r"(?:Act|Code|Ordinance|Constitution|Regulations?|Rules)\b",
+    I,
+)
+
+
+# Between an `after`-side marker and the citation it governs there may be a
+# path expression ("the first proviso to", "clause (e) of sub-section (3) of")
+# but never a new clause. This is the whole discriminator, and it fell out of
+# the data rather than being tuned to it: across the corpus's 39 `after`-side
+# sites, every citation the marker actually governs has NO comma before it, and
+# every citation belonging to a different clause has one. Sorted by distance the
+# two groups interleave — a gap threshold would have to be fitted — but sorted
+# by "is there a clause break", they separate exactly.
+#
+#   governed    ' ', ' in ', ' the first proviso to ',
+#               ' in clause (e) of sub-section (3) of '
+#   NOT governed ' the Code, where an order under ',
+#               ' of this Act, the directors appointed under '
+#
+# The failure it prevents: "Notwithstanding anything contained in THIS ACT, the
+# record ... shall be submitted for confirmation in accordance with the
+# provisions of section 183" was writing `supersedes` against s.183, 147
+# characters and two clauses away. The clause the marker qualifies is "this
+# Act", which names no section — so the honest answer is no edge.
+LEGAL_CLAUSE_BREAK: Pattern[str] = re.compile(r"[,;:.]")
+
+
 LEGAL_CITATIONS: tuple[Pattern[str], ...] = (
     # Indian reporters
     re.compile(r"\(?\b(19|20)\d{2}\)?\s*\(?\d{0,2}\)?\s*SCC\s+\d+", I),
@@ -450,6 +580,9 @@ LEGAL_PACK = DomainPack(
     markers=LEGAL_MARKERS,
     definition_patterns=LEGAL_DEFINITIONS,
     citation_patterns=LEGAL_CITATIONS,
+    section_ref_pattern=LEGAL_SECTION_REF,
+    foreign_ref_pattern=LEGAL_FOREIGN_REF,
+    clause_break_pattern=LEGAL_CLAUSE_BREAK,
     gate_terms=LEGAL_GATE_TERMS,
     override_scopes=LEGAL_OVERRIDE_SCOPES,
     notes="Covers Indian statutory text, judgments, and commercial contracts. "

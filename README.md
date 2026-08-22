@@ -28,14 +28,14 @@ passage is **about**; typed edges record how passages **govern each other**.
 
 ## Status: 15 of 40 tasks done
 
-133 tests pass; `mypy --strict` and `ruff` are clean.
+141 tests pass; `mypy --strict` and `ruff` are clean.
 
 | Phase | State |
 |---|---|
 | 0 · Validate the assumption | **Passed.** Closure chains are sparse on real data |
 | 1 · Substrate + baseline retrieval | Mostly done — L1 normalizer still missing |
 | 2 · Term symbol table | **Not started** (7 tasks) |
-| 3 · Closure edges + soundness | Soundness half **met and measured**; recall half **not met** — the extractor is short |
+| 3 · Closure edges + soundness | Soundness half **met and measured**; recall half **not met**, but closure traversal now wins a labeled case |
 | 4 · MCP tool surface | **Not started** (2 tasks) |
 | 5 · Cross-document | Not started (6 tasks) — post-MVP |
 | 6 · Cost and scale | Not started (4 tasks) — post-MVP |
@@ -82,6 +82,13 @@ added came from the context frontier, not a closure edge. Per `docs/06` §6.3
 that points at the **extractor**, not the traversal policy, and the traversal
 policy was left alone.
 
+Measured twice, on purpose. The first run had model edges for 1 of 9 documents
+(Gemini's free tier is 20 requests/day). The second, on Groq
+`openai/gpt-oss-120b`, covered all 9 — 147 calls, 123 model edges, 96 of them
+`exception_of` — and produced **exactly the same 10/11/11**. Six times the
+extraction changed nothing, so "extraction was too thin" is not the
+explanation.
+
 The mechanism is traced, not guessed: on the Child Labour case retrieval ranks
 "7. HOURS AND PERIOD OF WORK" and "8. WEEKLY HOLIDAYS" at 3 and 4 — the seeds
 are right — and the carve-out that answers the question has **zero inbound
@@ -90,11 +97,20 @@ section it was never shown. Full evidence, per-edge-type precision, and the
 three bugs the run exposed are in `BUILD_PLAN.md` Phase 3; the reasoning is in
 `decisions.md`.
 
-**Free-tier reality check:** the quota is
-`GenerateRequestsPerDayPerProjectPerModel-FreeTier` = **20 requests per day,
-per model** — confirmed on both `gemini-3.6-flash` and `gemini-2.5-flash`. A
-49-call run over five small acts gets ~19 through. Pricing with `--dry-run`
-first is still right, but the wall is requests/day, not tokens.
+**The evidence-span validator earns its keep.** Across 135 real candidates,
+**12 were discarded (8.9%)** — and every one was proposed at confidence >= 0.90.
+Three echoed the prompt's own `[N1] (heading)` scaffolding back as evidence,
+one stitched two separate nodes into a span that exists verbatim nowhere, and
+one cited "the Council" (11 chars), exactly the case the length floor exists
+for. Without the check those are twelve confident, wrong edges in the graph.
+
+**Provider notes, both of which cost a run:** Gemini's free tier is **20
+requests per day, per model** (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`,
+confirmed on `gemini-3.6-flash` and `gemini-2.5-flash`) — a 49-call run gets
+~19 through. Groq gives 1000/day at 8000 tokens/min, which is what made the
+full run possible; pace to the token budget, not the request count. And
+`groq/llama-3.3-70b-versatile`, the adapter's old default, **404s** — the
+default is now `groq/openai/gpt-oss-120b`.
 
 **`--rerank` has now run live**, offline, against the real
 `BAAI/bge-reranker-base` model. Verified: rerank ranked a return-window rule

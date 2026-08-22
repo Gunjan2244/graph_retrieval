@@ -497,33 +497,173 @@ echoing. With n=15 candidates this does not license any claim that the
 evidence-span validator is well calibrated on real text; it is simply
 untested at volume.
 
+**Re-run on Groq `openai/gpt-oss-120b` (2026-08-21), full L3 over all 9
+documents — and the negative result survived it.** The Gemini numbers above
+rested on model edges for 1 of 9 documents; this run has 147 successful calls,
+123 model edges written, and 96 model `exception_of` edges. The labeled-failure
+arms did not move by a single case:
+
+    A  seeds only        10/15        lost_exception  A 3/5
+    B  seeds + context   11/15                        B 3/5
+    C  full pipeline     11/15                        C 3/5
+
+Identical to the thinly-extracted run. **Six times the model edges changed
+nothing**, which removes "extraction was too thin" as an explanation and makes
+the diagnosis below the operative one. Soundness held at 0/170 with the
+flat-RAG falsification at 130/170 = 76.5% unsound (465 violations).
+
+The Child Labour carve-out is now sharper, not better: with full L3 coverage it
+still has **zero inbound edges**, and ss. 7 and 8 have no inbound closure edge
+at all. The model did not even repeat the (3) -> (1)/(2) edges Gemini proposed;
+it only proposed a `defines`. The relation "this carve-out disapplies ss. 7, 8
+and 9" is not something the extractor can express, at any extraction volume,
+because those sections are never in the window.
+
+**`discarded` is no longer zero, and every discard is a real defect.**
+135 candidates, **12 discarded (8.9%)**, 0 unresolvable labels, 51% of calls
+returning `{"edges": []}` (Gemini: 74-78%). Every one of the 12 was proposed at
+**confidence >= 0.90**:
+
+    10  evidence span not_in_window
+     1  src and dst are the same node
+     1  evidence span too_short (11 < 12 chars)   -- "the Council"
+
+Three of the ten echoed the prompt's own scaffolding back as evidence
+(`[N1] (heading) 4. National highways to vest in the Union...`), one stitched
+two separate nodes into a span that appears verbatim nowhere, and four were the
+same mid-sentence paraphrase reused across four edges. Without the check those
+are twelve confident, wrong edges in the graph — invariant 10 ("enforce in
+code, not in the prompt") earning its place with real numbers rather than
+adversarial fixtures. The 12-char floor caught exactly the case it exists for.
+
+**Per-edge-type precision on the Groq run, hand-checked, n >= 20 where the
+population allowed it:**
+
+    MODEL edges (groq/openai/gpt-oss-120b)
+      exception_of   16/20  (80%)  sampled from 96. All 4 errors are one of
+                                   two shapes: 3 enumeration items in a single
+                                   C&AG s.11 list labeled `exception_of` when
+                                   they are list members, and 1 cross-reference
+                                   off-by-one (a proviso naming clause (c)
+                                   pointed at clause (d)).
+      defines        15/17  (88%)  the whole population. DIRECTION correct
+                                   16/17 — a real improvement on gemini-2.5-
+                                   flash, which reversed 2 of 3. The one
+                                   reversal is a deeming provision emitted as
+                                   definition -> use; the other error is a
+                                   sub-clause labeled `defines` where the
+                                   relation is `part_of`.
+      supersedes      1/1          still only one proposed in 147 calls. The
+                                   type remains effectively unmeasured, and
+                                   that is itself a finding: non obstante
+                                   clauses are common in this corpus and the
+                                   model almost never volunteers `supersedes`
+                                   for them.
+
+Deterministic populations are unchanged from the measurements above
+(`exception_of`/structural 20/20, `defines`/pattern 17/20,
+`defines`/structural 11/15).
+
+**Reference resolution rewritten (2026-08-22), and the arms moved for the
+first time.** Blocker 1 below said cross-section blindness "is now the whole
+story" and pointed at `_resolve_target`. Auditing that function found a second
+defect nobody had looked for — the sites it *did* resolve:
+
+    resolved `referenced` sites, 63 acts     54
+      fabricated (foreign-act citation)       6   "section 12 of the Central
+                                                   Goods and Services Tax Act"
+                                                   -> THIS act's s.12
+      borrowed from an unrelated clause       8   first hit in the whole node
+      ------------------------------------------
+      wrong                                  14   = 26%, all CLOSURE-class
+
+Three changes, all in the direction invariant 11 points (pack data, not engine
+logic), plus one engine change to stop returning a single target:
+
+1. `MarkerPattern.ref_side` — which side of the marker its citation sits on.
+   Non obstante / subject to / save as provided end their match at the
+   preposition so the citation FOLLOWS; the amendment surgery markers name
+   their target BEFORE the operative phrase and take the nearest one.
+2. `LEGAL_FOREIGN_REF` — a citation qualified by another instrument's name
+   resolves to nothing, never to a best guess.
+3. `LEGAL_CLAUSE_BREAK` — the citation must be in the marker's own clause.
+   Chosen because the data separates exactly on it and does not separate on
+   distance: sorted by gap the correct and incorrect sites interleave (correct
+   at 48 chars, incorrect at 32); sorted by "is there a comma between", all 23
+   correct have none and all 16 incorrect have one. Searched in the gaps
+   BETWEEN citations, never inside one, so "sections 3, 4 and 5" survives.
+4. `_resolve_targets` returns a list — one edge per named provision.
+
+Then the finding that actually moved the number: **the cross-reference
+carve-out matched no marker at all.** `nothing_shall_apply` requires "nothing
+in THIS section"; "Nothing in Secs . 7, 8 and 9 shall apply" matched nothing in
+the pack, so the resolver was never reached. Added
+`nothing_in_referenced_shall_apply` (`ref_side="within"`, so `evidence_span` is
+the claim and not the two words introducing it; verb list taken from the corpus
+— apply, be, affect, authorise).
+
+    referenced pattern edges     54 -> 33 (+5 from the new marker = 38)
+      hand-checked precision     40/54 = 74%   ->   38/38 = 100%
+    cross-reference linkage      5/8 = 62%     ->   7/8 = 88%
+
+    phase3_exit_report.py, same 9-doc bundle, no model:
+      before   A 10/15  B 11/15  C 11/15    lost_exception A 3/5 B 3/5 C 3/5
+      after    A 10/15  B 11/15  C 12/15    lost_exception A 3/5 B 3/5 C 4/5
+
+**The standing negative finding is now false.** "Closure traversal changed no
+labeled case" held across two extraction runs; the Child Labour carve-out is
+now `never / never / expansion` — reached by arm C, and by neither seeds nor
+context expansion. Soundness held at 0/170, flat-RAG falsification 77.1%
+unsound (437 violations). Ingest stayed idempotent (2981 edges, identical on
+re-run).
+
+**Phase 3 EXIT STILL NOT MET.** One case is not "a clear margin", and the
+labeled set is 15. Each mechanism above is pinned by a test that fails when the
+mechanism is reverted — verified by reverting all four in turn.
+
+Two defects this exposed, both left alone deliberately:
+
+- **Sub-section citations do not resolve** — "Notwithstanding anything
+  contained in sub-section (1)" is the single largest unresolved form (85 of
+  254 corpus-wide; 12 of the 15 non-firings of the new marker). The section
+  registry is keyed on section headings only, so there is nothing to resolve
+  against. This is a registry gap, not a resolver gap, and it is now the
+  biggest remaining lever.
+- **`Foreign_Marriage_Act,_1969` s.24 is parsed as a FOOTNOTE**, so it never
+  enters the registry and the one remaining unlinked cross-reference carve-out
+  ("nothing contained in section 24 aforesaid") correctly resolves to nothing.
+  A parser misclassification; the footnote heuristic is load-bearing for
+  `test_footnote_node_is_never_a_closure_edge_target` and was not touched.
+
 **What is still blocking, in order:**
 
-1. **Free-tier quota, and it is much harder than "generous".** The key's
-   limit is `GenerateRequestsPerDayPerProjectPerModel-FreeTier`,
-   **quotaValue 20 — twenty requests per day, per model.** Verified on both
-   `gemini-3.6-flash` and `gemini-2.5-flash`. A 49-call run over five small
-   acts gets ~19 calls through and 429s the remaining 30. Pricing first was
-   right and did not help: the wall is requests/day, not tokens. Getting
-   ≥20 model edges per type — what docs/06 6.3 asks for — needs a paid key
-   or a second provider (Groq was the original recommendation and remains
-   untried; no `GROQ_API_KEY` is set).
-2. **L3 has model edges for 1 of 9 documents.** Everything above therefore
-   measures a mostly-deterministic graph. The negative result stands for
-   what was measurable, but "the graph does not beat the baseline" is not
-   yet a verdict on a fully-extracted graph.
+1. **Sub-section citations do not resolve.** The cross-SECTION half of this is
+   fixed and measured above; the sub-section half is untouched and is now the
+   larger population by far. See `NEXT_STEPS.md`.
+2. **`supersedes` is still unmeasured** — 1 model edge in 147 calls.
 3. **Seeding was lexical, not hybrid + rerank.** `BAAI/bge-large-en-v1.5` is
    NOT cached on this machine (README claimed otherwise; the 4.8G in
-   `~/.cache/huggingface` is `microsoft/phi-4`), and two download attempts
-   died on the documented network stall. This makes the baseline WEAKER than
-   docs/06 6.3 baseline 2, which can only flatter traversal — so the
-   negative conclusion is robust to it, though the absolute recall numbers
-   will move.
-4. **The labeled failure set is 15/50** (Phase 0, still open). All 15 are now
+   `~/.cache/huggingface` is `microsoft/phi-4`), and three download attempts
+   died on the documented network stall. A weaker baseline can only flatter
+   traversal, so the negative conclusion is robust to it — the absolute recall
+   numbers will move.
+4. **The labeled failure set is 15/50** (Phase 0, still open). All 15 are
    measured; the margin question deserves more than 15 cases.
-5. **The eval harness still does not write `eval_traces`.** The three-way
-   split is computed in `scripts/phase3_exit_report.py` and printed, not
-   persisted.
+5. **The eval harness still does not write `eval_traces`.** The three-way split
+   is computed in `scripts/phase3_exit_report.py` and printed, not persisted.
+
+**Provider notes, both of which cost a run:**
+
+- **Gemini free tier is 20 requests/day, per model** —
+  `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, confirmed on
+  `gemini-3.6-flash` and `gemini-2.5-flash`. Groq's is 1000/day with 8000
+  tokens/min, which is what made the full run possible. Pace calls to the TPM
+  budget, not the request count.
+- **`groq/llama-3.3-70b-versatile`, the adapter's documented default, 404s**
+  ("does not exist or you do not have access to it") — the same staleness that
+  retired `gemini-2.0-flash`. Default is now `groq/openai/gpt-oss-120b`,
+  verified reachable with native `json_schema` + `strict`. A model id is data:
+  ask the provider, never assume.
 
 **Three bugs the first real corpus run exposed, all fixed and all pinned by
 a test that fails when the fix is reverted:**
@@ -553,6 +693,18 @@ a test that fails when the fix is reverted:**
   section failure and leave the latch alone; a 400-class rejection still
   falls back to JSON mode.
   (`test_a_rate_limit_does_not_permanently_downgrade_the_run_to_json_mode`)
+
+- **The wire schema was rejected by strict structured output.** `confidence`
+  has a Pydantic default, so it was absent from `required` — valid JSON Schema,
+  and a 400 from every strict implementation ("`required` ... must include
+  every key in properties"). The adapter reads a 400 as "this provider cannot
+  do json_schema" and latches into plain JSON mode, so one defaulted field
+  silently cost every remaining call the closed label enum — the thing that
+  makes a fabricated endpoint unrepresentable rather than merely invalid.
+  `response_json_schema` now marks every property required; `ExtractedEdge`
+  keeps its default, so a response omitting `confidence` still parses. Strict
+  on what we ask for, lenient on what we accept.
+  (`test_wire_schema_marks_every_property_required`)
 
 Also environmental, and it cost a whole run: **`tenacity` was not installed**,
 so litellm's `num_retries=2` raised `tenacity import failed` instead of

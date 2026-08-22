@@ -28,6 +28,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from re import Match
 from typing import Literal
 
 from dge.domains.legal import DomainPack, MarkerPattern
@@ -54,7 +55,6 @@ MARKER_ORIENTATION: dict[EdgeType, Orientation] = {
 _HEADING_KEY_RE = re.compile(
     r"^\s*(?:(?:Section|Chapter|Article)\s+)?(?:\d{1,3}\[)*(\d{1,4}[A-Z]{0,2})\.", re.IGNORECASE,
 )
-_REF_RE = re.compile(r"section\s+(\d+[A-Za-z]*)", re.IGNORECASE)
 
 
 def _orientation(edge_type: EdgeType) -> Orientation:
@@ -185,18 +185,103 @@ def extract_structural_edges(
     return edges
 
 
-def _resolve_target(node: Node, marker: MarkerPattern, cursor: _SectionCursor) -> str | None:
+_LIST_SPLIT_RE = re.compile(r"\s*(?:,|and|&|or)\s*", re.IGNORECASE)
+
+
+def _referenced_targets(
+    node: Node, marker: MarkerPattern, match: Match[str],
+    cursor: _SectionCursor, pack: DomainPack,
+) -> list[str]:
+    """Every provision in THIS document that `marker`'s citation names.
+
+    Three properties, each of which was a defect measured on the real corpus
+    rather than a hypothetical:
+
+    1. **Search one side of the marker, not the whole node.** A node routinely
+       cites several provisions in unrelated clauses; taking the first hit
+       anywhere gave a target the marker does not govern in 8 of 54 sites.
+       Which side is pack data (`MarkerPattern.ref_side`) because it is a fact
+       about the drafting formula, not about graphs.
+    2. **A citation to another instrument resolves to nothing.** Not to a
+       best guess. `pack.foreign_ref_pattern` is checked against the text
+       immediately after the number list, and a hit ends resolution for that
+       citation — a `supersedes` edge is CLOSURE-class, so traversal follows it
+       unbudgeted and a fabricated one is worse than silence (invariant 9).
+    3. **A citation may name several provisions, and all of them are targets.**
+       "section 28, section 30, section 31, section 34" is one relation
+       expressed four times, and a single-target resolver kept a quarter of it.
+
+    Returns targets in citation order, de-duplicated, never including `node`
+    itself. An empty list means "this marker cites nothing reachable here",
+    which is a legitimate answer and the caller reports it as a skip.
+    """
+    pattern = pack.section_ref_pattern
+    if pattern is None:
+        return []
+
+    if marker.ref_side == "within":
+        # The citation sits inside the matched phrase, so the match IS the
+        # window and no side-search is needed. Used where the marker has to
+        # span the citation to make a usable evidence span: "Nothing in" alone
+        # proves nothing, "Nothing in Secs . 7, 8 and 9" proves the claim.
+        window = match.group(0)
+        refs = list(pattern.finditer(window))
+    elif marker.ref_side == "after":
+        # Everything the marker governs lies in its own clause, so accept
+        # citations only up to the first clause break — a citation past it
+        # belongs to a different clause (see `pack.clause_break_pattern`).
+        #
+        # The break has to be looked for in the GAPS between citations, never
+        # inside one: "sections 3, 4 and 5" is a single citation that happens
+        # to contain commas, and truncating the window at the first comma would
+        # keep s.3 and silently drop s.4 and s.5 — re-introducing the
+        # under-resolution this function exists to fix.
+        window = node.raw[match.end():]
+        refs = []
+        cursor_pos = 0
+        for ref in pattern.finditer(window):
+            if pack.clause_break_pattern is not None and pack.clause_break_pattern.search(
+                window, cursor_pos, ref.start()
+            ):
+                break
+            refs.append(ref)
+            cursor_pos = ref.end()
+    else:
+        # "in section 1, in sub-section (2), for the words ... shall be
+        # substituted" — the amendment formula puts clause breaks BETWEEN the
+        # citation and the operative phrase, so the clause rule above cannot
+        # apply here. Nearness does the same job: the target is the closest
+        # citation to the left, not the first one in the node.
+        window = node.raw[: match.start()]
+        refs = list(pattern.finditer(window))[-1:]
+
+    out: list[str] = []
+    for ref in refs:
+        if pack.foreign_ref_pattern is not None and pack.foreign_ref_pattern.match(
+            window[ref.end():ref.end() + 160]
+        ):
+            continue
+        for number in _LIST_SPLIT_RE.split(ref.group(1)):
+            target = cursor.section_registry.get(number.strip().upper())
+            if target is not None and target != node.node_id and target not in out:
+                out.append(target)
+    return out
+
+
+def _resolve_targets(
+    node: Node, marker: MarkerPattern, match: Match[str],
+    cursor: _SectionCursor, pack: DomainPack,
+) -> list[str]:
     hint = marker.target_hint
     if hint == "preceding":
-        return cursor.prev_sibling.get(node.node_id) or cursor.parent_of.get(node.node_id)
+        target = cursor.prev_sibling.get(node.node_id) or cursor.parent_of.get(node.node_id)
+        return [target] if target is not None and target != node.node_id else []
     if hint == "following":
-        return cursor.next_sibling.get(node.node_id)
+        target = cursor.next_sibling.get(node.node_id)
+        return [target] if target is not None and target != node.node_id else []
     if hint == "referenced":
-        ref = _REF_RE.search(node.raw)
-        if not ref:
-            return None
-        return cursor.section_registry.get(ref.group(1).upper())
-    return None
+        return _referenced_targets(node, marker, match, cursor, pack)
+    return []
 
 
 def extract_marker_edges(
@@ -226,8 +311,8 @@ def extract_marker_edges(
             m = marker.regex.search(node.raw)
             if not m:
                 continue
-            target = _resolve_target(node, marker, cursor)
-            if target is None or target == node.node_id:
+            targets = _resolve_targets(node, marker, m, cursor, pack)
+            if not targets:
                 warnings.append(
                     f"{node.node_id}: marker '{marker.name}' matched but target "
                     f"(hint={marker.target_hint}) could not be resolved; edge skipped"
@@ -239,13 +324,17 @@ def extract_marker_edges(
                     f"{node.node_id}: marker '{marker.name}' evidence span not verbatim; discarded"
                 )
                 continue
-            src, dst = _orient(node.node_id, target, marker.edge_type)
             confidence = 1.0 if marker.confidence.value == "strong" else 0.6
-            edges.append(Edge(
-                edge_id=f"marker:{marker.name}:{node.node_id}:{dst}",
-                src=src, dst=dst, type=marker.edge_type,
-                provenance=Provenance.PATTERN,
-                confidence=confidence,
-                evidence_span=evidence,
-            ))
+            # One citation can name several provisions ("sections 7, 8 and 9").
+            # That is one relation asserted about each of them, so it is several
+            # edges — they share an evidence span, and `dst` keeps the ids apart.
+            for target in targets:
+                src, dst = _orient(node.node_id, target, marker.edge_type)
+                edges.append(Edge(
+                    edge_id=f"marker:{marker.name}:{node.node_id}:{dst}",
+                    src=src, dst=dst, type=marker.edge_type,
+                    provenance=Provenance.PATTERN,
+                    confidence=confidence,
+                    evidence_span=evidence,
+                ))
     return edges, warnings

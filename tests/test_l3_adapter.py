@@ -13,7 +13,7 @@ import pytest
 
 from dge.adapters.extract_llm import ExtractorError, LiteLLMEdgeExtractor
 from dge.l3.prompt import prompt_hash, ref_labels
-from dge.l3.schema import response_json_schema
+from dge.l3.schema import ExtractionResponse, response_json_schema
 from dge.parsing import PlainTextParser, finalize_doc_id
 
 pytest.importorskip("pydantic")
@@ -170,3 +170,32 @@ def test_a_provider_that_rejects_the_schema_still_falls_back_to_json_mode(nodes,
     assert extractor._structured_output is False
     assert seen[0]["response_format"]["type"] == "json_schema"
     assert seen[1]["response_format"] == {"type": "json_object"}
+
+
+def test_wire_schema_marks_every_property_required(nodes):
+    """Strict structured output rejects a schema whose `required` is partial.
+
+    `confidence` has a default, so Pydantic leaves it out of `required` — valid
+    JSON Schema, and a 400 from every strict implementation:
+
+        `required` is required to be supplied and to be an array including
+        every key in properties
+
+    Groq returned exactly that for `openai/gpt-oss-120b`, and because the
+    adapter reads a 400 as "this provider cannot do json_schema" it latched
+    into plain JSON mode for the whole run — costing every remaining call the
+    closed label enum. The wire schema tightens; `ExtractedEdge` keeps the
+    default, so a response omitting `confidence` still parses.
+    """
+    schema = response_json_schema(list(ref_labels(nodes)))
+    edge = schema["$defs"]["ExtractedEdge"]
+    assert set(edge["required"]) == set(edge["properties"])
+    assert "confidence" in edge["required"]
+    assert set(schema["required"]) == set(schema["properties"])
+
+    # Lenient on what we accept, strict on what we ask for.
+    parsed = ExtractionResponse.model_validate_json(
+        '{"edges": [{"src_ref": "N1", "dst_ref": "N2", "type": "defines",'
+        ' "evidence_span": "some verbatim text here"}]}'
+    )
+    assert parsed.edges[0].confidence == 0.5
