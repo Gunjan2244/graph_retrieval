@@ -172,6 +172,45 @@ def test_a_provider_that_rejects_the_schema_still_falls_back_to_json_mode(nodes,
     assert seen[1]["response_format"] == {"type": "json_object"}
 
 
+def test_pacing_spaces_calls_out_by_the_configured_interval(nodes, monkeypatch):
+    """A free-tier TPM cap is hit by burst; `min_interval_s` is the knob that
+    keeps a corpus run under it (decisions.md 2026-08-21, and NEXT_STEPS'
+    `DGE_PROBE_PACE_S`). The first call never waits; each one after it sleeps
+    off the remainder of the interval.
+    """
+    import dge.adapters.extract_llm as mod
+
+    clock = [1000.0]
+    slept: list[float] = []
+    monkeypatch.setattr(mod.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(mod.time, "sleep", lambda s: slept.append(s))
+
+    _fake_litellm(monkeypatch, ['{"edges": []}'] * 3)
+    extractor = LiteLLMEdgeExtractor(model="fake/recorded", min_interval_s=12.0)
+
+    extractor.extract(nodes, "Section 12", "test doc")
+    assert slept == []  # nothing scheduled yet
+
+    clock[0] += 4.0  # 4s of real work elapsed
+    extractor.extract(nodes, "Section 12", "test doc")
+    assert slept == [pytest.approx(8.0)]  # 12 - 4 still owed
+
+    clock[0] += 20.0  # slow section overran the interval
+    extractor.extract(nodes, "Section 12", "test doc")
+    assert slept == [pytest.approx(8.0)]  # no negative sleep added
+
+
+def test_pacing_is_off_by_default(nodes, monkeypatch):
+    import dge.adapters.extract_llm as mod
+
+    monkeypatch.setattr(mod.time, "sleep",
+                        lambda s: pytest.fail(f"unpaced extractor slept {s}s"))
+    _fake_litellm(monkeypatch, ['{"edges": []}'] * 2)
+    extractor = LiteLLMEdgeExtractor(model="fake/recorded")
+    extractor.extract(nodes, "Section 12", "test doc")
+    extractor.extract(nodes, "Section 12", "test doc")
+
+
 def test_wire_schema_marks_every_property_required(nodes):
     """Strict structured output rejects a schema whose `required` is partial.
 

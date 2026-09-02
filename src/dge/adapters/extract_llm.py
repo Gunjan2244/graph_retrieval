@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Sequence
 from typing import Any, cast
 
@@ -100,6 +101,7 @@ class LiteLLMEdgeExtractor:
         temperature: float = 0.0,
         max_retries: int = 2,
         timeout: float = 90.0,
+        min_interval_s: float = 0.0,
     ) -> None:
         self.model = model
         self.model_id = f"litellm:{model}"
@@ -107,10 +109,27 @@ class LiteLLMEdgeExtractor:
         self._temperature = temperature
         self._max_retries = max_retries
         self._timeout = timeout
+        # Client-side pacing between calls. A free-tier TPM cap (Groq's is 8000)
+        # is hit by burst, not by daily volume, and a 429 here is recorded as a
+        # failed section, never retried per-call (see the latch below and
+        # decisions.md 2026-08-21). Spacing calls out is the sanctioned way to
+        # stay under the cap; 0.0 keeps tests and paid tiers at full speed.
+        self._min_interval_s = min_interval_s
+        self._next_call_at = 0.0
         self._structured_output = True
+
+    def _pace(self) -> None:
+        if self._min_interval_s <= 0.0:
+            return
+        wait = self._next_call_at - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        self._next_call_at = time.monotonic() + self._min_interval_s
 
     def _complete(self, messages: list[dict[str, str]], labels: Sequence[str]) -> str:
         import litellm  # imported lazily: `dge[llm]` is an optional extra
+
+        self._pace()
 
         kwargs: dict[str, Any] = {
             "model": self.model,

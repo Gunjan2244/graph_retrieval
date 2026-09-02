@@ -251,7 +251,9 @@ def _cmd_extract(args: argparse.Namespace) -> int:
 
     summary = extract_bundle(
         bundle_path,
-        LiteLLMEdgeExtractor(model=args.model, temperature=args.temperature),
+        LiteLLMEdgeExtractor(
+            model=args.model, temperature=args.temperature, min_interval_s=args.pace
+        ),
         domain=args.domain,
     )
     print(f"extracted: {summary.model_id}")
@@ -340,6 +342,12 @@ def build_parser() -> argparse.ArgumentParser:
                               "groq/... (GROQ_API_KEY), gemini/... (GEMINI_API_KEY), "
                               "ollama/... (no key). Default: %(default)s")
     extract.add_argument("--temperature", type=float, default=0.0)
+    extract.add_argument("--pace", type=float, default=0.0, metavar="SECONDS",
+                         help="Minimum seconds between model calls. A free-tier "
+                              "tokens-per-minute cap (Groq: 8000) is hit by burst, not "
+                              "daily volume, and a 429 is recorded as a failed section, "
+                              "never retried — so pacing, not retry, is how to stay "
+                              "under it. Try 12-15 for the Groq free tier; 0 = no pacing.")
     extract.add_argument("--domain", default="legal", help="Domain pack (default: legal)")
     extract.add_argument("--dry-run", action="store_true",
                          help="Report what the cost gate would admit and what the "

@@ -45,12 +45,13 @@ from typing import TYPE_CHECKING
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from dge.bundle import open_bundle
+from dge.cli import _make_hybrid_seeder
 from dge.domains.legal import get_pack
 from dge.edges import extract_marker_edges, extract_structural_edges
 from dge.lexicon import extract_terms, link_mentions
 from dge.model import EdgeType, NodeKind
 from dge.parsing import PlainTextParser, finalize_doc_id
-from dge.query import run_query, verify_answer
+from dge.query import rerank_seeder, run_query, verify_answer
 from dge.retrieval.lexical import LexicalIndex
 from dge.traversal.expand import context_frontier
 from dge.traversal.policy import Budget
@@ -58,7 +59,40 @@ from dge.traversal.policy import Budget
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from dge.bundle import BundleGraph
     from dge.model import Node
+    from dge.query import Seeder
+
+SEEDING_MODES = ("lexical", "hybrid", "hybrid-rerank")
+
+
+def build_seeder(graph: BundleGraph, nodes: Sequence[Node], mode: str) -> Seeder:
+    """The seed stage for every arm, chosen by `mode`.
+
+    docs/06 §6.3 names "normalized nodes + hybrid + rerank, no traversal" as the
+    baseline the graph must beat — so the honest way to ask whether closure
+    traversal earns its place is to give arm A that same seeder, not the weaker
+    lexical-only one. All three arms share whatever this returns; the only
+    variable between them stays what traversal adds.
+
+    Reuses the product CLI's own `_make_hybrid_seeder` / `rerank_seeder` rather
+    than a parallel implementation, so the eval measures the seeding path that
+    actually ships.
+    """
+    if mode == "lexical":
+        shared = LexicalIndex(nodes)
+        return lambda q, k: [s.node_id for s in shared.search(q, k)]
+    hybrid = _make_hybrid_seeder(graph)
+    if hybrid is None:
+        raise SystemExit(
+            "error: --seeding "
+            f"{mode} needs vectors in the bundle; run `dge embed -b <bundle>` first"
+        )
+    if mode == "hybrid":
+        return hybrid
+    from dge.adapters.rerank_local import DEFAULT_MODEL, FastEmbedReranker
+
+    return rerank_seeder(hybrid, graph, FastEmbedReranker(model_name=DEFAULT_MODEL))
 
 _WS = re.compile(r"\s+")
 
@@ -103,7 +137,8 @@ def gold_nodes(gold: str, nodes: Sequence[Node]) -> list[str]:
     return hits
 
 
-def labeled_failure_arms(bundle: Path, taxonomy: Path, top_k: int) -> None:
+def labeled_failure_arms(bundle: Path, taxonomy: Path, top_k: int,
+                         seeding: str = "lexical") -> None:
     cases = [json.loads(line) for line in taxonomy.read_text().splitlines() if line.strip()]
     pack = get_pack("legal")
     tally: Counter[str] = Counter()
@@ -113,6 +148,7 @@ def labeled_failure_arms(bundle: Path, taxonomy: Path, top_k: int) -> None:
         nodes = graph.all_nodes()
         present = {Path(d.source_uri or d.doc_id).name for d in graph.documents()}
         index = LexicalIndex(nodes)
+        seeder = build_seeder(graph, nodes, seeding)
 
         for case in cases:
             if case["source_file"] not in present:
@@ -120,7 +156,7 @@ def labeled_failure_arms(bundle: Path, taxonomy: Path, top_k: int) -> None:
                 continue
             gold = set(gold_nodes(case["gold_span"], nodes))
             query = case["query"]
-            seeds = tuple(s.node_id for s in index.search(query, top_k))
+            seeds = tuple(seeder(query, top_k))
 
             ctx_only = context_frontier(
                 graph, seeds=seeds, already_included=seeds,
@@ -150,7 +186,7 @@ def labeled_failure_arms(bundle: Path, taxonomy: Path, top_k: int) -> None:
                 tally["unsound"] += 1
             rows.append((case["cause"], a, b, c, sound.ok, query))
 
-    print("== labeled failure set (corpus/failure_taxonomy.jsonl) ==\n")
+    print(f"== labeled failure set (corpus/failure_taxonomy.jsonl) — seeding: {seeding} ==\n")
     print(f"{'cause':22} {'A seeds':10} {'B +ctx':10} {'C +closure':10} sound  query")
     for cause, a, b, c, ok, query in rows:
         print(f"{cause:22} {a:10} {b:10} {c:10} {ok!s:6} {query[:52]}")
@@ -166,17 +202,18 @@ def labeled_failure_arms(bundle: Path, taxonomy: Path, top_k: int) -> None:
         print(f"({tally['not_in_bundle']} labeled case(s) skipped — document not in this bundle)")
 
 
-def soundness_sweep(bundle: Path, limit: int) -> None:
+def soundness_sweep(bundle: Path, limit: int, seeding: str = "lexical") -> None:
     pack = get_pack("legal")
     with open_bundle(bundle) as graph:
         nodes = graph.all_nodes()
+        seeder = build_seeder(graph, nodes, seeding)
         headings = [" ".join(n.raw.split()) for n in nodes
                     if n.kind is NodeKind.STRUCTURAL and 12 < len(n.raw) < 120]
         queries = random.Random(20260821).sample(headings, min(limit, len(headings)))
 
         flat_unsound = full_unsound = flat_violations = 0
         for query in queries:
-            result = run_query(graph, query, nodes=nodes, top_k=8, pack=pack)
+            result = run_query(graph, query, nodes=nodes, top_k=8, pack=pack, seeder=seeder)
             # Flat RAG: the model sees only what retrieval ranked.
             flat = verify_answer(graph, cited_node_ids=result.seeds,
                                  context_node_ids=result.seeds)
@@ -253,14 +290,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--taxonomy", type=Path, default=Path("corpus/failure_taxonomy.jsonl"))
     ap.add_argument("--queries", type=int, default=300, help="soundness sweep size")
     ap.add_argument("--top-k", type=int, default=8)
+    ap.add_argument("--seeding", choices=SEEDING_MODES, default="lexical",
+                    help="seed stage shared by all three arms (docs/06 §6.3). "
+                         "hybrid / hybrid-rerank need `dge embed` to have run. "
+                         "Default: lexical")
     args = ap.parse_args(argv)
 
     if not args.bundle.is_file():
         print(f"error: no bundle at {args.bundle}", file=sys.stderr)
         return 2
 
-    labeled_failure_arms(args.bundle, args.taxonomy, args.top_k)
-    soundness_sweep(args.bundle, args.queries)
+    labeled_failure_arms(args.bundle, args.taxonomy, args.top_k, args.seeding)
+    soundness_sweep(args.bundle, args.queries, args.seeding)
     if args.corpus.is_dir():
         exception_linkage(args.corpus)
     return 0
