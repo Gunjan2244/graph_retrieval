@@ -221,6 +221,8 @@ def _cmd_embed(args: argparse.Namespace) -> int:
     print(f"embedded: {summary.model_id}")
     print(f"  documents  {summary.documents_embedded}")
     print(f"  nodes      {summary.nodes_embedded}")
+    if summary.nodes_skipped:
+        print(f"  skipped    {summary.nodes_skipped} (already had this model's vectors)")
     if summary.warnings:
         print(f"  warnings   {len(summary.warnings)}")
         for w in summary.warnings[:20]:

@@ -38,6 +38,13 @@ class FastEmbedEmbedder:
     correctness requirement for Stage B's traversal to be testable end to end).
     """
 
+    #: Not contextual (see class docstring), so chunking within a document
+    #: changes nothing about the vectors — and it must be capped: one call with
+    #: a whole large document drove ONNX Runtime's allocation arena to ~3.9GB
+    #: and was OOM-killed on the corpus's largest act (615 nodes) while the
+    #: same model handled 375-node documents fine. See `pipeline.embed_bundle`.
+    max_batch = 32
+
     def __init__(self, model_name: str = DEFAULT_MODEL, cache_dir: str | None = None) -> None:
         from fastembed import TextEmbedding  # local import: keep this module's
         # top-level clean of the vendor SDK for anyone who only imports the

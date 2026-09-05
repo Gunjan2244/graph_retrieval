@@ -417,3 +417,257 @@ findings (sub-section citations, cited "for the purposes of", and this) all
 pointing at the same two places: the labeled set is 15 cases, and seeding is
 lexical. Neither is an extraction problem, and continuing to fix extraction
 is unlikely to move the exit criterion.
+
+## 2026-09-05 — Seeding unblocked: the margin survives an honest baseline
+
+**Decision: measure all three seeding modes on one bundle before touching the
+extractor again, and report the margin decomposition rather than the headline.**
+
+Three prior rounds closed real extraction gaps without moving `A 10/15 B 11/15
+C 12/15`. `NEXT_STEPS.md` named the cause — seeding was still lexical — and
+made unblocking it the precondition for any further extraction work. Two
+environment facts turned out to be wrong in the docs, and both mattered.
+
+**The bundle was measuring a corpus with a hole in it.** `node_vectors` held
+986 rows against 1601 nodes. `embed_bundle` writes per document, all-or-nothing,
+so this was not thin coverage but one missing document: `Mines_Act,_1952`, 615
+nodes, the largest in the corpus — and the holder of **4 of the 15 labeled
+failure cases**. The Sep 2 embed run stopped before it. Any hybrid measurement
+taken before today would have given those four cases no dense retrieval at all
+and silently reported it as a traversal result. Re-embedded to 1601/1601.
+
+**The vectors were written by an undocumented model.** Those 986 rows are
+`fastembed:BAAI/bge-small-en-v1.5` (384-dim), not the `bge-large-en-v1.5` that
+`README.md` and `HANDOFF.md` document. No `decisions.md` entry recorded the
+substitution. Logged here because a 384-dim quantized model as the seeding
+substrate is exactly the kind of silent drift the version key exists to prevent.
+
+**`bge-large` was never a code problem and is no longer an environment one.**
+Its ONNX weight blob was a 50MB `.incomplete` stub — three sessions read that as
+a network stall. It downloaded and loaded on the first retry today (1024-dim,
+5.5 min). The blocker was transient, and treating it as standing cost three
+rounds of misdirected extraction work.
+
+**Result — one bundle, three seeding modes, same 15 labeled cases.**
+
+```
+seeding            A      B      C     C-A    flat-RAG unsound   traversal
+lexical           10/15  11/15  12/15   +2    78.2% (448 viol)   0/170
+hybrid            10/15  11/15  12/15   +2    80.0% (694 viol)   0/170
+hybrid-rerank     12/15  13/15  14/15   +2    75.3% (588 viol)   0/170
+```
+
+**Reranking, not dense retrieval, is what pays.** Plain hybrid is a wash: it
+fixes the Betwa `lost_scope` case — confirming the 2026-08-22 prediction that
+it was a seeding failure and not an extraction one, since that gold node had
+already been given the right inbound edge — but loses a Mines `lost_exception`
+case, netting zero. Adding the reranker recovers the Mines case, keeps Betwa,
+and gains a `needs_aggregation` case: +2 on every arm.
+
+**The margin decomposes, and the decomposition is the finding.** At
+hybrid-rerank, `B - A = +1` is the Actuaries Council case via budgeted context
+expansion, and `C - B = +1` is the Child Labour case, reached by closure
+traversal and by nothing else (`never / never / expansion`). That single case is
+the product claim in isolation: an exception no amount of seeding quality
+reaches, recovered only by the unbudgeted reverse-index walk. Invariant 6's
+split between budgeted and unbudgeted traversal earns exactly one case here,
+and it is the case the system exists for.
+
+**Against the Phase 3 exit criterion** (read with the CORRECTION below —
+this measures a deterministic graph, not an L3 one). Soundness is 0/170 with the
+falsification arm at 75.3% unsound, so the check is not vacuous. Those 170
+queries are section headings sampled deterministically (seed 20260821) from
+real corpus text, not human-written questions; the 15 labeled cases do carry
+real questions, and their gold spans were re-checked as 15/15 verbatim in the
+source files. Recall is
+14/15 against a baseline of 12/15 — and arm A here *is* `docs/06` §6.3
+baseline 2 (normalized nodes + hybrid + rerank, no traversal), not the weaker
+lexical bar every previous measurement used. The margin did **not grow** with
+better seeding; it held at +2 across all three regimes while the baseline itself
+rose two cases. Surviving a stronger baseline is the stronger claim, and it is
+the one the exit criterion actually asks for.
+
+**CORRECTION (same day, before this entry was acted on): the measured graph
+contains no L3 edges at all.** Checked after the fact rather than before, which
+is the process failure here. `select count(*) from edges where
+provenance='model'` returns **0** on both bundles; all 3000 edges are
+deterministic — 2009 `structural` context, 904 `pattern` closure, 87
+`structural` closure. The "L3 has run, 123 model edges on Groq" state described
+in `NEXT_STEPS.md` belonged to an earlier bundle that no longer exists; the
+2026-09-02 rebuild did not re-run L3, and this entry above repeated that framing
+without verifying it against the bundle actually being measured.
+
+The numbers are unaffected and remain real — 14/15 and 0/170 were produced by
+real models over a real corpus. What changes is what they are evidence *for*:
+closure traversal reaches 14/15 and stays sound **on a purely deterministic
+graph**, with the pattern extractor in `domains/legal.py` supplying every
+closure edge. That is a cleaner and cheaper result than the one claimed, and a
+narrower one: it says nothing about whether L3 works, because L3 contributed
+nothing. The Child Labour case that only closure traversal reaches is carried by
+a `pattern` edge, not a model edge.
+
+**Honest limit, unchanged and now binding.** n=15. A +2 margin on 15 cases
+cannot be significant however stable it looks across three regimes, and the
+stability itself is weak evidence — the same two cases move each time. The
+remaining `never` in arm C is one Mines Act `lost_exception`. The taxonomy at
+15/50 is no longer one of two candidate next steps; it is the only thing
+standing between this result and a defensible one.
+
+## 2026-09-05 — L2 was unbounded per document, and silently lost one
+
+**Decision: cap the per-call text count via an opt-in adapter attribute, make
+the stage resumable, and keep whole-document calls the default.**
+
+`embed_bundle` passed an entire document to `embed_documents` in one call. The
+count of texts was therefore unbounded, and on `Mines_Act,_1952` (615 nodes,
+the corpus's largest) with `bge-large-en-v1.5` it drove ONNX Runtime's arena to
+**3.9GB anon-rss and was OOM-killed** — confirmed in the kernel log, not
+inferred. The same document had failed the same way on the 2026-09-02 run with
+`bge-small`. Both times the failure was invisible: writes happen per document,
+so the eight completed documents persisted and the run simply ended.
+
+**The cost of that invisibility is the point.** The missing document held 4 of
+the 15 labeled failure cases. A hybrid-seeding measurement taken against that
+bundle would have given those four cases no dense retrieval whatsoever and
+reported the result as a property of traversal. This is precisely the failure
+mode invariant 9 exists to prevent — it degraded to confident wrong rather than
+to labeled low confidence — and it violated definition-of-done 3, since a
+kernel kill records no reason anywhere.
+
+**Why batching is opt-in rather than always on.** The original one-call-per-
+document design was not an oversight: a contextual embedder (`VoyageEmbedder`)
+uses that grouping to contextualize each unit against its true siblings, so
+splitting it silently changes what the vectors mean. Chunking unconditionally
+would have fixed the memory bug by breaking the embedder the stack table
+actually prefers. Instead `dge.interfaces.Embedder` documents an optional
+`max_batch: int`; `FastEmbedEmbedder` declares 32 because it is explicitly
+non-contextual (it embeds each text independently), and `VoyageEmbedder`
+declares nothing and still receives whole documents. The knowledge lives in the
+adapter, which is the only place that knows whether grouping carries meaning.
+
+**Resumability, because L2 over a real corpus gets interrupted.** Nodes already
+holding a vector from the same `model_id` are skipped. Without this, recovering
+from the OOM meant re-embedding eight completed documents (~30 min) before
+reaching the missing one — and then dying on it again. The skip is keyed on
+`model_id`, so switching embedders still re-embeds everything rather than
+silently keeping the old model's vectors. Re-running start to finish still
+produces identical output for identical input, so idempotence (definition-of-
+done 1) is unaffected.
+
+**A docstring that was wrong in a load-bearing way.** `vector_model_ids` claimed
+L2 rows are "keyed `(node_id, model_id)` conceptually" and that `INSERT OR
+REPLACE` "only overwrites same-node-same-model rows". The schema PK is
+`node_id` alone, so a new model replaces whatever vector a node held. Corrected,
+because the resume logic depends on reading that relationship correctly.
+
+**Falsification, measured rather than asserted.** Four mechanisms, each reverted
+in turn to confirm a test fails:
+
+```
+revert chunking (step = whole doc)        -> 2 fail  (max_batch, failure-path)
+revert the resume filter                  -> 1 fail  (resumed-run skip)
+make the skip model_id-agnostic           -> 1 fail  (different-model re-embed)
+chunk even without a declared max_batch   -> 1 fail  (contextual guarantee)
+```
+
+That last one guards the direction the others do not: it fails if batching ever
+stops being opt-in, which is what would quietly break Voyage.
+
+163 tests pass (was 157), `ruff` and `mypy --strict` clean.
+
+**Verified on the real path, not only against `FakeEmbedder`.** Working
+agreement 1 forbids claiming this on unit tests alone, so the shipping
+`embed_bundle` was made to re-embed the exact document that killed it —
+`Mines_Act,_1952`, 615 nodes, real `bge-large-en-v1.5`, vectors deleted first:
+
+```
+documents  1        nodes 615      skipped 986 (already embedded)
+elapsed    553s     rc=0
+peak RSS   2.63 GB  (the unbatched run died at 3.90 GB anon-rss)
+```
+
+Peak stayed flat rather than growing with document size, which is the property
+`max_batch` is supposed to buy. The resume path was measured separately against
+the finished bundle: **1601 skipped, 0 embedded, 8.9s**, where a full re-run is
+~45 min. Both mechanisms exercised through the CLI, on the real model.
+
+## 2026-09-05 — A labeled set sized to detect an effect, not to look thorough
+
+**Decision: mine cases from closure edges, generate questions with the gold
+withheld, and keep only what the STRONG baseline fails.**
+
+The 15-case set could not answer the question it existed for. Arm C's context
+structurally contains arm A's, so C can never lose a case A wins; the comparison
+is therefore a count of RESCUES, and there were 2 (exact binomial p = 0.50).
+The binding quantity is not total cases but `m`, the number the strong baseline
+fails — only those can carry evidence. The old set had m=3, because it was
+written against a naive baseline that reranking has since outgrown, leaving 12
+cases at the ceiling where nothing can be measured.
+
+**Corpus widened to 30 acts** (4708 nodes, 8871 edges): `exception_of` 81 -> 226,
+`supersedes` 5 -> 21. Embedded with `bge-small-en-v1.5`, since the same-day
+measurement showed 384-dim and 1024-dim give identical arms on every category.
+`Regional_Rural_Banks_Act,_1976` parsed to zero nodes and was held
+`review-pending` — invariant 9 doing its job, so the bundle is effectively 29.
+
+**The generator never saw the gold span.** Questions were written from the RULE
+and its heading only, exported as three prompt files and produced externally
+(the Groq key was dead at that point). Verified mechanically: 0 of 120 gold
+spans appeared anywhere in the exported prompts. A question paraphrased from the
+carve-out would test lexical matching rather than retrieval, and no prompt
+instruction can be trusted to prevent that — hence a coded overlap guard, which
+rejected 8 of 120.
+
+**Selection consulted arm A only.** Arm C is never called in
+`build_hard_cases.py`; selecting on C-success would have chosen the cases that
+flatter the graph and manufactured the result being measured.
+
+**The funnel, and the number that changes the design.**
+
+```
+questions generated            120
+rejected: echoed the gold        8   (overlap guard)
+rejected: gold not verbatim      0
+rejected: BASELINE FOUND IT     23
+survivors (baseline failures)   89   <- 79.5% baseline-failure rate
+```
+
+79.5%, against 20% for the hand-written set. Mining from closure edges targets
+the hard population an order of magnitude more efficiently than writing
+questions by hand — this, not the labeling effort, was the real bottleneck.
+
+**The answerability judge earned its place, and its rejections are the
+interesting part.** 89 -> 49 kept. The rejections expose a mining artifact worth
+recording: a rule often carries SEVERAL provisos, and mining pairs the question
+with whichever carve-out the edge happens to point from. One rejected case asked
+at what age the Comptroller and Auditor-General must vacate office and was
+paired with the *resignation* proviso rather than the age-65 one — the human
+set's version of that same case has the correct gold. The judge caught it. Nine
+cases hit Groq's TPM cap and were kept unverified rather than discarded (an
+infrastructure failure is not evidence); re-judged at slower pacing, 5 of those
+9 were also rejects.
+
+**Final: 49 cases, 49/49 verbatim-grounded, 21 acts — and badly skewed.**
+
+```
+lost_exception          47  (96%)
+lost_scope               2  (4%)
+lost_referent            0
+needs_aggregation        0
+topic_not_proposition    0
+wrong_version            0   <- all 4 candidates rejected by the judge
+```
+
+**This must be reported as two instruments, not one.** The new set has the power
+to prove or kill the exception claim (95% CI half-width ~±13% on the rescue
+rate; it clears significance even if the true rescue rate is as low as 10%,
+where the old set could not clear it at 67%). It says NOTHING about five of the
+six failure modes. In particular `wrong_version` is empty, so the half of the
+product claim about superseded versions is untested — a corpus limit, not a
+sampling one: only 2 amendment acts exist in the 62 available.
+
+**Honest limits.** Questions are LLM-written; withholding the gold and guarding
+overlap bounds the echo risk but does not make them user questions. The set is
+enriched by construction, so `A 0/49` is definitional and there is no unbiased
+recall number in it. And it still needs human review — the judge says the gold
+is relevant, not that a lawyer would accept it as the answer.

@@ -211,6 +211,7 @@ class EmbedSummary:
     model_id: str
     documents_embedded: int
     nodes_embedded: int
+    nodes_skipped: int = 0  # already carried this model's vector; resume path
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -222,18 +223,34 @@ def embed_bundle(bundle_path: Path, embedder: Embedder) -> EmbedSummary:
     architecture table): swapping the embedder means calling this again, never
     re-running L0/L1/L3.
 
-    Embeds each document's nodes in ONE call per document, not one call for the
-    whole corpus. This matters beyond batching: a contextual embedder
-    (`dge.adapters.embed_hosted.VoyageEmbedder`) uses the grouping itself to
-    contextualize chunks against their true siblings — mixing nodes from
-    different documents into one call would contextualize them against each
-    other, which is wrong, not just slower.
+    Never mixes nodes from different documents into one call: a contextual
+    embedder (`dge.adapters.embed_hosted.VoyageEmbedder`) uses that grouping to
+    contextualize chunks against their true siblings, so crossing a document
+    boundary would silently change what the vectors mean.
+
+    WITHIN a document the call is split only when the embedder declares
+    `max_batch` (see `dge.interfaces.Embedder`), which a contextual embedder
+    must not do. That opt-in exists because one call per document is unbounded
+    in the number of texts: on the corpus's largest act (615 nodes) it drove
+    ONNX Runtime to ~3.9GB and was OOM-killed, leaving that document — and 4 of
+    15 labeled eval cases with it — silently unembedded while the run above it
+    reported success.
+
+    Resumable: nodes already carrying a vector from this `model_id` are
+    skipped, so a re-run after an interruption costs only the missing work.
+    Re-running start to finish still produces identical output for identical
+    input, since a skipped node holds the vector this call would have written.
     """
     warnings: list[str] = []
     nodes_embedded = 0
+    nodes_skipped = 0
     docs_embedded = 0
 
+    raw_batch = getattr(embedder, "max_batch", None)
+    max_batch = raw_batch if isinstance(raw_batch, int) and raw_batch > 0 else None
+
     with open_bundle(bundle_path) as graph:
+        already = graph.embedded_node_ids(embedder.model_id)
         for doc in graph.documents():
             if doc.review_state == "pending":
                 warnings.append(f"{doc.doc_id}: review-pending, skipped (no L1 ran)")
@@ -242,30 +259,53 @@ def embed_bundle(bundle_path: Path, embedder: Embedder) -> EmbedSummary:
             if not doc_nodes:
                 continue
 
-            texts = [n.normalized or n.raw for n in doc_nodes]
-            doc_summary = doc.source_uri or doc.doc_id
-            vectors = embedder.embed_documents(texts, doc_context=doc_summary)
-            if len(vectors) != len(doc_nodes):
-                warnings.append(
-                    f"{doc.doc_id}: embedder returned {len(vectors)} vectors for "
-                    f"{len(doc_nodes)} nodes; skipped"
-                )
+            pending = [n for n in doc_nodes if n.node_id not in already]
+            nodes_skipped += len(doc_nodes) - len(pending)
+            if not pending:
                 continue
 
-            write_node_vectors(
-                bundle_path,
-                model_id=embedder.model_id,
-                dim=embedder.dim,
-                vectors={n.node_id: v for n, v in zip(doc_nodes, vectors)},
-            )
-            nodes_embedded += len(doc_nodes)
-            docs_embedded += 1
+            doc_summary = doc.source_uri or doc.doc_id
+            step = max_batch or len(pending)
+            written = 0
+            for start in range(0, len(pending), step):
+                chunk = pending[start:start + step]
+                texts = [n.normalized or n.raw for n in chunk]
+                try:
+                    vectors = embedder.embed_documents(texts, doc_context=doc_summary)
+                except (MemoryError, RuntimeError) as exc:
+                    # A Python-level failure is recordable; a kernel OOM kill is
+                    # not catchable at all, which is why `max_batch` prevention
+                    # matters more than this handler.
+                    warnings.append(
+                        f"{doc.doc_id}: embedder failed at node {start} of "
+                        f"{len(pending)}: {type(exc).__name__}: {exc}"
+                    )
+                    break
+                if len(vectors) != len(chunk):
+                    warnings.append(
+                        f"{doc.doc_id}: embedder returned {len(vectors)} vectors for "
+                        f"{len(chunk)} nodes at offset {start}; stopped"
+                    )
+                    break
+
+                write_node_vectors(
+                    bundle_path,
+                    model_id=embedder.model_id,
+                    dim=embedder.dim,
+                    vectors={n.node_id: v for n, v in zip(chunk, vectors)},
+                )
+                written += len(chunk)
+
+            nodes_embedded += written
+            if written == len(pending):
+                docs_embedded += 1
 
     return EmbedSummary(
         bundle_path=bundle_path,
         model_id=embedder.model_id,
         documents_embedded=docs_embedded,
         nodes_embedded=nodes_embedded,
+        nodes_skipped=nodes_skipped,
         warnings=tuple(warnings),
     )
 

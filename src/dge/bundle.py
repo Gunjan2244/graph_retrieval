@@ -392,10 +392,13 @@ class BundleGraph:
 
     def vector_model_ids(self) -> list[str]:
         """Distinct `model_id` values present in node_vectors, most-recent
-        first. A bundle can carry vectors from more than one embedder (e.g.
-        after switching providers without re-embedding) since L2 rows are
-        keyed `(node_id, model_id)` conceptually — `INSERT OR REPLACE` only
-        overwrites same-node-same-model rows."""
+        first. A bundle can carry vectors from more than one embedder, but only
+        with different nodes under each: `node_vectors` is keyed on `node_id`
+        ALONE (see sql/schema.sql), so re-embedding a node with a new model
+        replaces whatever vector it held. A mixed result here therefore means a
+        partial re-embed, not two models covering the same nodes — which is why
+        `embedded_node_ids` filters on `model_id` rather than assuming
+        coverage."""
         rows = self._conn.execute(
             "SELECT model_id, MAX(computed_at) mc FROM node_vectors "
             "GROUP BY model_id ORDER BY mc DESC"
@@ -410,6 +413,18 @@ class BundleGraph:
         else:
             row = self._conn.execute("SELECT 1 FROM node_vectors LIMIT 1").fetchone()
         return row is not None
+
+    def embedded_node_ids(self, model_id: str) -> set[str]:
+        """Node ids already carrying a vector from `model_id`.
+
+        Lets `pipeline.embed_bundle` resume: L2 over a large corpus is long
+        enough that it gets interrupted (an OOM kill on the largest document
+        is what motivated this), and without it a re-run repeats every
+        completed document before reaching the missing one."""
+        rows = self._conn.execute(
+            "SELECT node_id FROM node_vectors WHERE model_id = ?", (model_id,)
+        ).fetchall()
+        return {r["node_id"] for r in rows}
 
     def search_vectors(
         self, query_vector: Sequence[float], *, model_id: str, top_k: int = 10

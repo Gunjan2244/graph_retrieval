@@ -42,7 +42,16 @@ class Normalizer(Protocol):
 
 class Embedder(Protocol):
     """L2. Prefer a model that encodes each unit with its document context
-    (late chunking / contextual embeddings) over isolated-chunk encoding."""
+    (late chunking / contextual embeddings) over isolated-chunk encoding.
+
+    Optional attribute `max_batch: int`. `embed_bundle` passes a whole
+    document to `embed_documents` in one call by default, because a contextual
+    embedder uses that grouping to contextualize each unit against its true
+    siblings — splitting it would silently change what the vectors mean. An
+    implementation that is NOT contextual, and whose memory cost grows with the
+    number of texts per call, may declare `max_batch` to cap it; the pipeline
+    then chunks within the document. Do not set it on a contextual embedder.
+    """
 
     model_id: str
     dim: int

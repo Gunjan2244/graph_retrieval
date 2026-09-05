@@ -11,6 +11,7 @@ network access, not in the default fast test run.
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -113,3 +114,118 @@ def test_vector_model_ids_reflects_what_was_written(bundle):
     embed_bundle(bundle, FakeEmbedder())
     with open_bundle(bundle) as g:
         assert g.vector_model_ids() == ["fake:hash-v1"]
+
+
+class RecordingEmbedder(FakeEmbedder):
+    """FakeEmbedder that records the size of every `embed_documents` call, so a
+    test can assert on HOW the pipeline chunked — not just on the final rows,
+    which look identical whether batching happened or not."""
+
+    def __init__(self, max_batch: int | None = None) -> None:
+        self.calls: list[int] = []
+        if max_batch is not None:
+            self.max_batch = max_batch  # opt-in per dge.interfaces.Embedder
+
+    def embed_documents(
+        self, texts: Sequence[str], doc_context: str | None = None
+    ) -> Sequence[Sequence[float]]:
+        self.calls.append(len(texts))
+        return super().embed_documents(texts, doc_context)
+
+
+def test_an_embedder_declaring_max_batch_is_never_handed_more_than_that(bundle):
+    """The OOM guard. One call per document is unbounded in the number of
+    texts; on the real corpus that reached ~3.9GB and was OOM-killed. Delete
+    the chunking in `embed_bundle` and this fails."""
+    emb = RecordingEmbedder(max_batch=3)
+    embed_bundle(bundle, emb)
+
+    assert emb.calls, "embedder was never called"
+    assert max(emb.calls) <= 3, f"a call exceeded max_batch: {emb.calls}"
+
+
+def test_an_embedder_without_max_batch_still_gets_the_whole_document_at_once(bundle):
+    """The contextual-embedder guarantee. Voyage contextualizes each unit
+    against its siblings, so splitting a document silently changes what the
+    vectors mean. Batching must stay opt-in."""
+    emb = RecordingEmbedder()  # declares no max_batch
+    embed_bundle(bundle, emb)
+
+    with open_bundle(bundle) as g:
+        n_nodes = len(g.all_nodes())
+    assert emb.calls == [n_nodes], (
+        f"expected one call of {n_nodes}, got {emb.calls}"
+    )
+
+
+def test_batching_produces_the_same_vectors_as_one_call(tmp_path):
+    """Chunking must be a memory strategy, not a semantic change."""
+    whole = tmp_path / "whole.sqlite"
+    chunked = tmp_path / "chunked.sqlite"
+    ingest_documents([SAMPLE], domain="legal", out_path=whole)
+    ingest_documents([SAMPLE], domain="legal", out_path=chunked)
+
+    embed_bundle(whole, RecordingEmbedder())
+    embed_bundle(chunked, RecordingEmbedder(max_batch=2))
+
+    def stored(path: Path) -> dict[str, str]:
+        conn = sqlite3.connect(path)
+        try:
+            return {
+                nid: blob
+                for nid, blob in conn.execute(
+                    "SELECT node_id, vector_base64 FROM node_vectors"
+                )
+            }
+        finally:
+            conn.close()
+
+    assert stored(whole) == stored(chunked)
+
+
+def test_a_resumed_run_skips_nodes_that_already_have_this_models_vector(bundle):
+    """Resumability. An interrupted L2 run must not repeat completed
+    documents. Delete the `already` filter and `calls` is non-empty."""
+    first = RecordingEmbedder(max_batch=4)
+    s1 = embed_bundle(bundle, first)
+    assert s1.nodes_embedded > 0
+    assert s1.nodes_skipped == 0
+
+    second = RecordingEmbedder(max_batch=4)
+    s2 = embed_bundle(bundle, second)
+
+    assert second.calls == [], "re-embedded nodes that already had vectors"
+    assert s2.nodes_embedded == 0
+    assert s2.nodes_skipped == s1.nodes_embedded
+
+
+def test_a_different_model_id_is_not_treated_as_already_embedded(bundle):
+    """The skip is keyed on model_id, so switching embedders still re-embeds
+    every node rather than silently keeping the old model's vectors."""
+    embed_bundle(bundle, RecordingEmbedder(max_batch=4))
+
+    other = RecordingEmbedder(max_batch=4)
+    other.model_id = "fake:hash-v2"
+    summary = embed_bundle(bundle, other)
+
+    assert summary.nodes_skipped == 0
+    assert summary.nodes_embedded > 0
+
+
+def test_an_embedder_failing_midway_records_a_reason_instead_of_crashing(bundle):
+    """CLAUDE.md: no silent excepts; a failure writes a reason. The batch that
+    succeeded before the failure stays written."""
+
+    class FailsAfterFirstBatch(RecordingEmbedder):
+        def embed_documents(self, texts, doc_context=None):
+            if len(self.calls) >= 1:
+                raise MemoryError("simulated allocation failure")
+            return super().embed_documents(texts, doc_context)
+
+    emb = FailsAfterFirstBatch(max_batch=2)
+    summary = embed_bundle(bundle, emb)
+
+    assert summary.warnings, "failure produced no recorded reason"
+    assert "MemoryError" in summary.warnings[0]
+    assert summary.documents_embedded == 0, "partial document counted as done"
+    assert summary.nodes_embedded == 2, "the successful batch was not kept"
